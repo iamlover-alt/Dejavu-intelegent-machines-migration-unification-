@@ -10,7 +10,7 @@ The slice proves the identity loop. It leaves the supervisor re-plan loop, extra
 
 ## Implementation
 
-The path above is the `midplane` package. `python -m midplane.run --diff path` runs it and prints the episode id. See the [README](../../README.md) for environment variables.
+The path above is the `midplane` package. `python -m midplane.run --diff path` runs it and prints the episode id. See the [README](../../README.md) for environment variables. The slice milestone is [in review](https://github.com/iamlover-alt/Dejavu-intelegent-machines-migration-unification-/pull/2).
 
 Decisions in the code that the team artifacts may override:
 
