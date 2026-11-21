@@ -1,0 +1,36 @@
+name: iOS
+
+on:
+  pull_request:
+    paths:
+      - "ios/**"
+      - "clients/swift/**"
+      - "openapi/midplane-v0.yaml"
+      - ".github/workflows/ios.yml"
+  push:
+    branches: [main]
+    paths:
+      - "ios/**"
+      - "clients/swift/**"
+      - "openapi/midplane-v0.yaml"
+      - ".github/workflows/ios.yml"
+
+jobs:
+  build-and-test:
+    name: Build and test
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Test MidplaneKit
+        run: swift test --package-path ios
+
+      - name: Build the iOS app
+        run: |
+          xcodebuild \
+            -project ios/App/Dejavu.xcodeproj \
+            -scheme Dejavu \
+            -destination 'generic/platform=iOS Simulator' \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            build
