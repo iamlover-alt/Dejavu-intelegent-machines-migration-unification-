@@ -10,7 +10,20 @@ The mid-plane gives every platform run a durable identity — what was asked, wh
 
 Every graph run writes one **episode**. The episode database is the closed-loop corpus for training and eval.
 
-This change is the architecture baseline. Implementation starts with the [first vertical slice](docs/architecture/first-slice.md).
+The [first vertical slice](docs/architecture/first-slice.md) is implemented in the `midplane` package: `supervisor` → `router` → `code_review` → `episode_writer`.
+
+## Run the first slice
+
+```bash
+python -m pip install -e ".[dev]"
+python -m midplane.run --diff path/to/change.diff
+```
+
+The command prints the episode id. With no API key it uses the built-in fake model provider and writes episodes to `sqlite:///midplane_episodes.sqlite`. Override the database with `--database` or `MIDPLANE_DATABASE_URL` (`sqlite:///...` or `postgres://...`).
+
+`MIDPLANE_MODEL_PROVIDER=openai` or `anthropic` selects a real provider. Those modes read `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`, and they require `MIDPLANE_PRIMARY_MODEL` (optional `MIDPLANE_FALLBACK_MODEL`). Apply `migrations/001_episodes.sql` before using Postgres, and install the Postgres driver with `pip install -e ".[postgres]"`.
+
+Routing thresholds, when you want to override the defaults: `MIDPLANE_MAX_COST`, `MIDPLANE_MAX_LATENCY_MS`, `MIDPLANE_MIN_CONFIDENCE`.
 
 ## Doc map
 

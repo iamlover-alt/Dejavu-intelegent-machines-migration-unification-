@@ -14,14 +14,14 @@ Owners allowed in this tracker:
 | Skeptic Lab (trading research, paper only) | Trading research. Paper mode only. Real money stays behind the external trading control service |
 | Neutral Ops (general engineering) | General engineering: graph implementation, schema migration, observability plumbing |
 
-Status for every seeded row is `placeholder`.
+Status for every seeded row is `placeholder`, except **Ship the first vertical slice**, which is `in review` while [pull request #2](https://github.com/iamlover-alt/Dejavu-intelegent-machines-migration-unification-/pull/2) is open. That row's wording is still a placeholder relative to `dejavu_90day_plan.xlsx`.
 
 Context for the placeholders: [mid-plane architecture](../architecture/mid-plane.md), [first vertical slice](../architecture/first-slice.md), [README](../../README.md).
 
 | Milestone | Definition of done | Owner | Status | Evidence link |
 | --- | --- | --- | --- | --- |
 | PLACEHOLDER: Adopt the mid-plane architecture baseline | README, mid-plane spec, and first-slice plan are merged and the links between them resolve | Platform Architect | placeholder | [mid-plane architecture](../architecture/mid-plane.md) |
-| PLACEHOLDER: Ship the first vertical slice | A `code_review` run writes one `episodes` row with a stub quality score and a full trace, and the [acceptance criteria](../architecture/first-slice.md#acceptance-criteria) pass | Neutral Ops (general engineering) | placeholder | [first vertical slice](../architecture/first-slice.md) |
+| PLACEHOLDER: Ship the first vertical slice | A `code_review` run writes one `episodes` row with a stub quality score and a full trace, and the [acceptance criteria](../architecture/first-slice.md#acceptance-criteria) pass | Neutral Ops (general engineering) | in review | [pull request #2](https://github.com/iamlover-alt/Dejavu-intelegent-machines-migration-unification-/pull/2) |
 | PLACEHOLDER: Reconcile and apply the episode schema | `episode_schema.sql` is applied, and `episode_writer` persists a payload that matches `episode_example.json` | Platform Architect | placeholder | placeholder |
 | PLACEHOLDER: Register the Dev Guild role catalog | Every role in `dev_guild_prompt_templates.md` is registered as a worker subgraph under the supervisor contract in the [Dev Guild section](../architecture/mid-plane.md#dev-guild-workers) | Neutral Ops (general engineering) | placeholder | placeholder |
 | PLACEHOLDER: Enforce the trading control boundary in paper mode | Trading actions succeed only as tool calls to the trading control service; paper mode, hard limits, and the kill switch are enforced in that service; agent deployments have no broker credentials | Skeptic Lab (trading research, paper only) | placeholder | [trading integration](../architecture/mid-plane.md#trading-integration) |
