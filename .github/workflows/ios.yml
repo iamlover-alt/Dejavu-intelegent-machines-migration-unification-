@@ -27,10 +27,14 @@ jobs:
 
       - name: Build the iOS app
         run: |
+          # The generated client uses the OpenAPIGenerator package plugin.
+          # Xcode stops the build until that plugin is trusted; CI has no prompt.
+          defaults write com.apple.dt.Xcode IDESkipPackagePluginFingerprintValidatation -bool YES
           xcodebuild \
             -project ios/App/Dejavu.xcodeproj \
             -scheme Dejavu \
             -destination 'generic/platform=iOS Simulator' \
             -configuration Debug \
+            -skipPackagePluginValidation \
             CODE_SIGNING_ALLOWED=NO \
             build
