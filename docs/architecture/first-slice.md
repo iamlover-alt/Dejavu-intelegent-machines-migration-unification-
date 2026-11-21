@@ -8,6 +8,28 @@ The first implementation of the [mid-plane](mid-plane.md) is one vertical path:
 
 The slice proves the identity loop. It leaves the supervisor re-plan loop, extra guild roles, the trading tool, the iOS client, and the real quality rubric for later milestones in the [tracker](../plan/90-day-tracker.md).
 
+## Implementation
+
+The path above is the `midplane` package. `python -m midplane.run --diff path` runs it and prints the episode id. See the [README](../../README.md) for environment variables.
+
+Decisions in the code that the team artifacts may override:
+
+> RECONCILE with `episode_schema.sql`
+>
+> RECONCILE with `episode_example.json`
+>
+> RECONCILE with `langgraph_state_management.md`
+>
+> RECONCILE with `langgraph_nodes_pseudocode.py`
+>
+> RECONCILE with `dev_guild_prompt_templates.md`
+
+- The `episodes` columns match the illustrative DDL in this document. `migrations/001_episodes.sql` is the Postgres statement. Tests and the default CLI use SQLite, with JSON stored as text, because a disposable Postgres is not required to run the slice.
+- Checkpoints use LangGraph's in-memory saver, keyed by `thread_id`. The paragraph below still names a Postgres saver as the default when `langgraph_state_management.md` is silent. The in-memory saver is what this slice runs, so the CLI and CI do not need a database server. Switch the checkpointer if that document says otherwise; the episode table stays the same.
+- `midplane/prompts.py` is a stand-in for the `code_review` prompt. The structured findings are `summary`, `findings[]` (`severity`, `detail`, `ref`), and `confidence`.
+- Model cost on an episode is an estimate from token counts (`total_usd`), not a provider invoice.
+- The trading control client in `midplane/trading.py` refuses any mode other than `paper` and never calls a broker. It is not a graph tool.
+
 > RECONCILE with `langgraph_nodes_pseudocode.py`
 >
 > RECONCILE with `langgraph_state_management.md`
@@ -174,7 +196,7 @@ Call order inside `episode_writer`: append the writer trace event, set `outcome`
 
 ## Test plan
 
-Tests map to the acceptance criteria. Integration tests use a disposable Postgres. The model provider is a fake that returns scripted completions, errors, and token counts.
+Tests map to the acceptance criteria. Integration tests use an in-memory SQLite database. The model provider is a fake that returns scripted completions, errors, and token counts. Postgres is covered by `migrations/001_episodes.sql`, which CI checks for the same columns.
 
 | Test | Proves | Criteria |
 | --- | --- | --- |
