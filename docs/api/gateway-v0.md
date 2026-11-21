@@ -1,6 +1,6 @@
 # Gateway API v0
 
-The first HTTP surface an iPhone app can build against. It wraps the [first vertical slice](../architecture/first-slice.md): `supervisor` → `router` → `code_review` → `episode_writer`. Runs started here are ordinary graph runs with `source=app`.
+The first HTTP surface an iPhone app can build against. The implementation is [in review](https://github.com/iamlover-alt/Dejavu-intelegent-machines-migration-unification-/pull/3). It wraps the [first vertical slice](../architecture/first-slice.md): `supervisor` → `router` → `code_review` → `episode_writer`. Runs started here are ordinary graph runs with `source=app`.
 
 The contract file is [openapi/midplane-v0.yaml](../../openapi/midplane-v0.yaml) (OpenAPI 3.1). The served schema is generated from the same FastAPI app. CI fails if the two differ. After an intentional change, regenerate and commit the file:
 
