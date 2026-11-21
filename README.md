@@ -25,12 +25,23 @@ The command prints the episode id. With no API key it uses the built-in fake mod
 
 Routing thresholds, when you want to override the defaults: `MIDPLANE_MAX_COST`, `MIDPLANE_MAX_LATENCY_MS`, `MIDPLANE_MIN_CONFIDENCE`.
 
+## Run the gateway
+
+One command, with Postgres and a dev API key printed in the logs:
+
+```bash
+docker compose up --build
+```
+
+The same start is `sh scripts/dev-up.sh`. The contract and the iOS checklist are in [docs/api/gateway-v0.md](docs/api/gateway-v0.md). `GET /healthz` needs no key. Other `/v1` routes use the bearer key from the seed line `dev api key:`.
+
 ## Doc map
 
 | Document | What it decides |
 | --- | --- |
 | [Mid-plane architecture](docs/architecture/mid-plane.md) | Supervisor, model routing, shared state, the episode flywheel, Dev Guild workers, the trading boundary, observability, the iOS surface, and open questions |
 | [First vertical slice](docs/architecture/first-slice.md) | What to build first: supervisor → router → code-review worker → `episode_writer`, plus acceptance criteria and a test plan |
+| [Gateway API v0](docs/api/gateway-v0.md) | The HTTP contract an iOS app can build against, including auth v0 and the iOS checklist |
 | [90-day tracker](docs/plan/90-day-tracker.md) | Placeholder milestones. Replace the rows from `dejavu_90day_plan.xlsx` |
 
 ## How to read

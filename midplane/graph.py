@@ -385,23 +385,23 @@ def build_graph(deps: GraphDeps, checkpointer=None):
     return graph.compile(checkpointer=checkpointer if checkpointer is not None else MemorySaver())
 
 
-def run_review(
+def _start_run(
     diff: str,
     *,
-    repo: str = "local",
-    instructions: str = "Review this diff.",
-    run_id: str | None = None,
-    thread_id: str | None = None,
-    source: str = "dev_guild",
-    role: str = "code_review",
-    task: dict | None = None,
-    store: EpisodeStore | None = None,
-    provider: ModelProvider | None = None,
-    policy: RoutingPolicy | None = None,
-    route_table: dict | None = None,
-    budget: dict | None = None,
-    checkpointer=None,
-) -> RunResult:
+    repo: str,
+    instructions: str,
+    run_id: str | None,
+    thread_id: str | None,
+    source: str,
+    role: str,
+    task: dict | None,
+    store: EpisodeStore | None,
+    provider: ModelProvider | None,
+    policy: RoutingPolicy | None,
+    route_table: dict | None,
+    budget: dict | None,
+    checkpointer,
+):
     resolved_run_id = run_id or str(uuid.uuid4())
     resolved_thread_id = thread_id or resolved_run_id
     deps = GraphDeps(
@@ -425,14 +425,110 @@ def run_review(
     if task is not None:
         incoming["task"] = task
     config = {"configurable": {"thread_id": resolved_thread_id}}
-    final = graph.invoke(incoming, config=config)
-    episode = deps.store.get(resolved_run_id)
+    return deps, graph, incoming, config, resolved_run_id, resolved_thread_id
+
+
+def _result_from_state(deps: GraphDeps, graph, final: dict, run_id: str, thread_id: str) -> RunResult:
+    episode = deps.store.get(run_id)
     if episode is None:
         raise RuntimeError("episode_writer did not persist a row")
     return RunResult(
-        run_id=resolved_run_id,
-        thread_id=resolved_thread_id,
+        run_id=run_id,
+        thread_id=thread_id,
         state=final,
         episode=episode,
         graph=graph,
     )
+
+
+def run_review(
+    diff: str,
+    *,
+    repo: str = "local",
+    instructions: str = "Review this diff.",
+    run_id: str | None = None,
+    thread_id: str | None = None,
+    source: str = "dev_guild",
+    role: str = "code_review",
+    task: dict | None = None,
+    store: EpisodeStore | None = None,
+    provider: ModelProvider | None = None,
+    policy: RoutingPolicy | None = None,
+    route_table: dict | None = None,
+    budget: dict | None = None,
+    checkpointer=None,
+) -> RunResult:
+    deps, graph, incoming, config, resolved_run_id, resolved_thread_id = _start_run(
+        diff,
+        repo=repo,
+        instructions=instructions,
+        run_id=run_id,
+        thread_id=thread_id,
+        source=source,
+        role=role,
+        task=task,
+        store=store,
+        provider=provider,
+        policy=policy,
+        route_table=route_table,
+        budget=budget,
+        checkpointer=checkpointer,
+    )
+    final = graph.invoke(incoming, config=config)
+    return _result_from_state(deps, graph, final, resolved_run_id, resolved_thread_id)
+
+
+def stream_review(
+    diff: str,
+    *,
+    repo: str = "local",
+    instructions: str = "Review this diff.",
+    run_id: str | None = None,
+    thread_id: str | None = None,
+    source: str = "dev_guild",
+    role: str = "code_review",
+    task: dict | None = None,
+    store: EpisodeStore | None = None,
+    provider: ModelProvider | None = None,
+    policy: RoutingPolicy | None = None,
+    route_table: dict | None = None,
+    budget: dict | None = None,
+    checkpointer=None,
+):
+    """Yield one event per finished node, then a terminal event with the episode.
+
+    Node events are ``{"type": "node", "node": "<name>", "status": "completed"}``.
+    The last event is ``{"type": "done", "episode_id", "outcome", "output"}``.
+    """
+
+    deps, graph, incoming, config, resolved_run_id, _thread_id = _start_run(
+        diff,
+        repo=repo,
+        instructions=instructions,
+        run_id=run_id,
+        thread_id=thread_id,
+        source=source,
+        role=role,
+        task=task,
+        store=store,
+        provider=provider,
+        policy=policy,
+        route_table=route_table,
+        budget=budget,
+        checkpointer=checkpointer,
+    )
+    for update in graph.stream(incoming, config=config, stream_mode="updates"):
+        if not isinstance(update, dict):
+            continue
+        for node_name in update:
+            yield {"type": "node", "node": str(node_name), "status": "completed"}
+    episode = deps.store.get(resolved_run_id)
+    if episode is None:
+        raise RuntimeError("episode_writer did not persist a row")
+    yield {
+        "type": "done",
+        "episode_id": episode.run_id,
+        "outcome": episode.outcome,
+        "output": episode.outputs,
+        "quality_score": episode.quality_score,
+    }

@@ -1,0 +1,9 @@
+.git
+.venv
+.pytest_cache
+**/__pycache__
+*.sqlite
+*.sqlite3
+.dev-api-key
+clients
+tests

@@ -1,0 +1,34 @@
+services:
+  db:
+    image: postgres:16.6
+    environment:
+      POSTGRES_USER: midplane
+      POSTGRES_PASSWORD: midplane
+      POSTGRES_DB: midplane
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U midplane -d midplane"]
+      interval: 2s
+      timeout: 5s
+      retries: 20
+
+  api:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      MIDPLANE_DATABASE_URL: postgresql://midplane:midplane@db:5432/midplane
+      MIDPLANE_KEY_PEPPER: dev-pepper-not-for-production
+      MIDPLANE_MODEL_PROVIDER: fake
+      MIDPLANE_SEED_DEV_KEY: "1"
+      MIDPLANE_DEV_KEY_FILE: /data/dev-api-key
+      MIDPLANE_HOST: 0.0.0.0
+      MIDPLANE_PORT: "8000"
+    ports:
+      - "8000:8000"
+    volumes:
+      - devkeys:/data
+    restart: on-failure
+
+volumes:
+  devkeys:

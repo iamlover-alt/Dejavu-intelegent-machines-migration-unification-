@@ -10,11 +10,14 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
   "langgraph==1.2.24",
+  "fastapi==0.165.0",
+  "uvicorn==0.54.0",
 ]
 
 [project.optional-dependencies]
 dev = [
   "pytest==9.2.0",
+  "PyYAML==6.0.4",
 ]
 postgres = [
   "psycopg[binary]==3.3.9",
@@ -22,6 +25,9 @@ postgres = [
 
 [tool.setuptools.packages.find]
 include = ["midplane*"]
+
+[tool.setuptools.package-data]
+midplane = ["gateway/roster.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
