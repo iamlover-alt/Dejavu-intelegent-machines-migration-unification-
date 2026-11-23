@@ -1,0 +1,90 @@
+{
+  "export_date": "2026-11-08",
+  "company": "Déjà Vu Intelligence Machines™",
+  "scope": "migration of accessible saved company files, source snapshots, concepts, and verified external status",
+  "baseline": {
+    "filename": "Company_Export_2026-10-26.zip",
+    "sha256": "ab2601ffcf032b482b454bb24f60a92390b4c631e8a798b1d57a014bc7e065a7",
+    "size_bytes": 119418763,
+    "zip_entries": 287,
+    "saved_original_files_reported": 131,
+    "verified_repo_files_reported": 79,
+    "status": "preserved as expanded entries under baseline_2026-10-26/"
+  },
+  "additions": [
+    {
+      "name": "AGENTS.md",
+      "sha256": "3e254a4114fb80bc89bc80b3f7db746ce896c8f0420bc023652a3806cc1915f1",
+      "bytes": 5794,
+      "provenance": "saved project library, materialized during 2026-11-08 refresh"
+    },
+    {
+      "name": "trading-bots-automation-starter.zip",
+      "sha256": "6b259e6f90db73dffca951a0f5d4446fea1943d4406cb539793759ce701b3f8b",
+      "bytes": 8799,
+      "provenance": "saved project library, materialized during 2026-11-08 refresh"
+    },
+    {
+      "name": "trading-bots-automation-starter-v2.zip",
+      "sha256": "79ac410a6c0a779c1f14480919bae7c69d547190f86f415100020c4ff0a656e2",
+      "bytes": 16514,
+      "provenance": "saved project library, materialized during 2026-11-08 refresh"
+    },
+    {
+      "name": "trading-bots-automation-starter-v2.md",
+      "sha256": "a8be043830c3e1bb84b9cdf3b204c8f42e663057e895f0786ac43b29ffc5e1d4",
+      "bytes": 19707,
+      "provenance": "saved project library, materialized during 2026-11-08 refresh"
+    }
+  ],
+  "github": {
+    "repository": "https://github.com/yyv5zgkpsr-gif/Trading-bots-",
+    "default_branch": "claude/multi-agent-trading-orchestrator-9ciu2t",
+    "previous_snapshot_commit": "c23ee716ea77b71a91f8e78d750c3ad6cf268b01",
+    "current_commit": "a308fbfb557e9c8dfc4cae2ea1b7791068d7c543",
+    "current_git_tree": "6b860f5533df196edf24c577d84038871a6b98ee",
+    "current_blob_count": 111,
+    "current_tree_truncated": false,
+    "commits_ahead_of_archived_snapshot": 5,
+    "pr1": {
+      "number": 1,
+      "state": "closed",
+      "merged": true
+    },
+    "pr2": {
+      "number": 2,
+      "state": "open",
+      "merged": false,
+      "mergeable": true
+    },
+    "current_code_bytes_embedded": false,
+    "recover_script": "scripts/fetch_pinned_github_source.sh"
+  },
+  "render": {
+    "workspace_label": "My Workspace",
+    "services_result": "null / none returned",
+    "postgres_instances": "none found",
+    "key_value_instances": "none found",
+    "secrets_included": false
+  },
+  "whimsical": {
+    "repo_url": "https://github.com/yyv5zgkpsr-gif/Whimsical-",
+    "repository_access": "404 during check",
+    "source_included": false,
+    "brand_files_in_baseline": true
+  },
+  "completeness": {
+    "full_chat_histories": false,
+    "original_voice_recordings": false,
+    "full_git_history": false,
+    "current_github_head_file_bytes": false,
+    "cloud_databases": false,
+    "secrets": false
+  },
+  "security": {
+    "live_trading_activated": false,
+    "cloud_deploy_activated": false,
+    "source_does_not_certify_live_safety": true
+  },
+  "knowledge_records_are_reconstructed": true
+}
