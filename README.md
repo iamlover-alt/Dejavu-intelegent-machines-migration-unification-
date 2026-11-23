@@ -25,6 +25,14 @@ The command prints the episode id. With no API key it uses the built-in fake mod
 
 Routing thresholds, when you want to override the defaults: `MIDPLANE_MAX_COST`, `MIDPLANE_MAX_LATENCY_MS`, `MIDPLANE_MIN_CONFIDENCE`.
 
+## Export train and eval sets
+
+```bash
+python -m midplane.export --out-dir out/ --eval-fraction 0.2
+```
+
+Writes `train.jsonl` and `eval.jsonl`, one episode per line. The split is a deterministic hash of `--seed` and `run_id`, so the sets are disjoint and an episode keeps its set across exports. `--min-quality` and `--outcome` filter first. The quality rubric is not defined yet, so the filter uses whatever score the episode carries.
+
 ## Doc map
 
 | Document | What it decides |

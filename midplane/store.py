@@ -69,6 +69,9 @@ class EpisodeStore(Protocol):
     def count(self, run_id: str) -> int:
         """Return how many rows share run_id. A correct upsert keeps this at 1."""
 
+    def list_all(self) -> list[Episode]:
+        """Return every episode ordered by run_id."""
+
 
 def _dumps(value: object) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
@@ -138,6 +141,22 @@ class SqliteEpisodeStore:
         row = self._conn.execute("select count(*) as n from episodes where run_id = ?", (run_id,)).fetchone()
         return int(row["n"])
 
+    def list_all(self) -> list[Episode]:
+        selected = ", ".join(EPISODE_COLUMNS)
+        rows = self._conn.execute(f"select {selected} from episodes order by run_id").fetchall()
+        return [_row_to_episode(row) for row in rows]
+
+
+def _postgres_row_to_episode(row: tuple) -> Episode:
+    data = dict(zip(EPISODE_COLUMNS, row))
+    for column in JSON_COLUMNS:
+        raw = data[column]
+        if isinstance(raw, str):
+            data[column] = json.loads(raw)
+    data["latency_ms"] = int(data["latency_ms"])
+    data["quality_score"] = float(data["quality_score"])
+    return Episode(**data)
+
 
 class PostgresEpisodeStore:
     """Postgres store. Requires the optional `postgres` extra (`psycopg`).
@@ -192,14 +211,7 @@ class PostgresEpisodeStore:
         ).fetchone()
         if row is None:
             return None
-        data = dict(zip(EPISODE_COLUMNS, row))
-        for column in JSON_COLUMNS:
-            raw = data[column]
-            if isinstance(raw, str):
-                data[column] = json.loads(raw)
-        data["latency_ms"] = int(data["latency_ms"])
-        data["quality_score"] = float(data["quality_score"])
-        return Episode(**data)
+        return _postgres_row_to_episode(row)
 
     def count(self, run_id: str) -> int:
         row = self._conn.execute(
@@ -207,6 +219,11 @@ class PostgresEpisodeStore:
             (run_id,),
         ).fetchone()
         return int(row[0])
+
+    def list_all(self) -> list[Episode]:
+        selected = ", ".join(EPISODE_COLUMNS)
+        rows = self._conn.execute(f"select {selected} from episodes order by run_id").fetchall()
+        return [_postgres_row_to_episode(row) for row in rows]
 
 
 def migration_sql_path() -> Path:
