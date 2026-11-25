@@ -125,18 +125,71 @@ paths:
         schema:
           type: string
           title: Run Id
+      - name: Last-Event-ID
+        in: header
+        required: false
+        schema:
+          title: Last-Event-Id
+          type:
+          - string
+          - 'null'
       responses:
         '200':
-          description: Successful Response
+          description: 'Server-Sent Events for one run. Each frame is three lines:
+            `id`, `event`, and `data`, then a blank line.
+
+
+            `id` is a decimal integer, monotonic per run, starting at 1. It is stored
+            with the run, not per connection.
+
+            Send it back as the `Last-Event-ID` request header to resume. The server
+            replays frames whose id is greater than that value.
+
+            If the header is missing, not an integer, or not an id this run has stored,
+            the server replays the whole log.
+
+
+            `event` is one of `run.started`, `node.started`, `node.completed`, `run.completed`,
+            `run.failed`.
+
+            `data` is one JSON object. Its shape is the schema named for that event.
+
+
+            The graph reports a node when the node returns. The gateway then appends
+            `node.started` and `node.completed` for that node, in that order, with
+            the same `at` timestamp.'
           content:
-            application/json:
-              schema: {}
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/RunEvent'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      description: 'Server-Sent Events for one run. Each frame is three lines: `id`,
+        `event`, and `data`, then a blank line.
+
+
+        `id` is a decimal integer, monotonic per run, starting at 1. It is stored
+        with the run, not per connection.
+
+        Send it back as the `Last-Event-ID` request header to resume. The server replays
+        frames whose id is greater than that value.
+
+        If the header is missing, not an integer, or not an id this run has stored,
+        the server replays the whole log.
+
+
+        `event` is one of `run.started`, `node.started`, `node.completed`, `run.completed`,
+        `run.failed`.
+
+        `data` is one JSON object. Its shape is the schema named for that event.
+
+
+        The graph reports a node when the node returns. The gateway then appends `node.started`
+        and `node.completed` for that node, in that order, with the same `at` timestamp.'
   /v1/episodes/{episode_id}:
     get:
       tags:
@@ -187,10 +240,10 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
           title: Cursor
+          type:
+          - string
+          - 'null'
       responses:
         '200':
           description: Successful Response
@@ -231,19 +284,20 @@ components:
           type: array
           title: Data
         next_cursor:
-          anyOf:
-          - type: string
-          - type: 'null'
           title: Next Cursor
+          type:
+          - string
+          - 'null'
         limit:
           type: integer
           title: Limit
       type: object
       required:
       - data
-      - next_cursor
       - limit
       title: AgentPage
+      description: next_cursor is JSON null when there is no next page. The key is
+        sent. It may also be omitted.
     CreateRunRequest:
       properties:
         task_type:
@@ -253,11 +307,11 @@ components:
         input:
           $ref: '#/components/schemas/RunInput'
         client_ref:
-          anyOf:
-          - type: string
-            maxLength: 200
-          - type: 'null'
           title: Client Ref
+          maxLength: 200
+          type:
+          - string
+          - 'null'
       additionalProperties: false
       type: object
       required:
@@ -394,40 +448,41 @@ components:
           - succeeded
           - failed
           title: Status
-        result:
-          anyOf:
-          - additionalProperties: true
-            type: object
-          - type: 'null'
-          title: Result
-        episode_id:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Episode Id
         task_type:
           type: string
           title: Task Type
+        result:
+          title: Result
+          additionalProperties: true
+          type:
+          - object
+          - 'null'
+        episode_id:
+          title: Episode Id
+          type:
+          - string
+          - 'null'
         client_ref:
-          anyOf:
-          - type: string
-          - type: 'null'
           title: Client Ref
+          type:
+          - string
+          - 'null'
         error:
-          anyOf:
-          - type: string
-          - type: 'null'
           title: Error
+          type:
+          - string
+          - 'null'
       type: object
       required:
       - run_id
       - status
-      - result
-      - episode_id
       - task_type
-      - client_ref
-      - error
       title: RunStatusResponse
+      description: 'Nullable fields are sent as JSON null and may also be omitted.
+
+
+        result, episode_id, client_ref, and error use type [value, "null"] and are
+        not required.'
     ValidationError:
       properties:
         loc:
@@ -454,6 +509,160 @@ components:
       - msg
       - type
       title: ValidationError
+    RunStartedData:
+      type: object
+      title: RunStartedData
+      description: Payload for event run.started.
+      additionalProperties: false
+      required:
+      - run_id
+      - task_type
+      - at
+      properties:
+        run_id:
+          type: string
+          title: Run Id
+        task_type:
+          type: string
+          title: Task Type
+        at:
+          type: string
+          title: At
+          description: UTC timestamp.
+    NodeStartedData:
+      type: object
+      title: NodeStartedData
+      description: Payload for event node.started.
+      additionalProperties: false
+      required:
+      - node
+      - at
+      properties:
+        node:
+          type: string
+          title: Node
+        at:
+          type: string
+          title: At
+          description: UTC timestamp.
+    NodeCompletedData:
+      type: object
+      title: NodeCompletedData
+      description: Payload for event node.completed.
+      additionalProperties: false
+      required:
+      - node
+      - status
+      - at
+      properties:
+        node:
+          type: string
+          title: Node
+        status:
+          type: string
+          enum:
+          - completed
+          title: Status
+        at:
+          type: string
+          title: At
+          description: UTC timestamp.
+    RunCompletedData:
+      type: object
+      title: RunCompletedData
+      description: Payload for event run.completed. episode_id is null only if the
+        writer did not persist a row.
+      additionalProperties: false
+      properties:
+        run_id:
+          type: string
+          title: Run Id
+        status:
+          type: string
+          enum:
+          - succeeded
+          title: Status
+        episode_id:
+          type:
+          - string
+          - 'null'
+          title: Episode Id
+          description: Present as a string when the episode row exists. JSON null
+            when it does not. The key is sent either way.
+        at:
+          type: string
+          title: At
+          description: UTC timestamp.
+      required:
+      - run_id
+      - status
+      - at
+    RunFailedData:
+      type: object
+      title: RunFailedData
+      description: Payload for event run.failed.
+      additionalProperties: false
+      properties:
+        run_id:
+          type: string
+          title: Run Id
+        status:
+          type: string
+          enum:
+          - failed
+          title: Status
+        episode_id:
+          type:
+          - string
+          - 'null'
+          title: Episode Id
+          description: String when an episode row was still written. JSON null when
+            the run failed before the writer. The key is sent either way.
+        error:
+          type:
+          - string
+          - 'null'
+          title: Error
+          description: Failure message. JSON null when there is no message. The key
+            is sent either way.
+        at:
+          type: string
+          title: At
+          description: UTC timestamp.
+      required:
+      - run_id
+      - status
+      - at
+    RunEvent:
+      type: object
+      title: RunEvent
+      description: One stored frame. The HTTP body is text/event-stream, not a JSON
+        array of these objects.
+      additionalProperties: false
+      required:
+      - id
+      - event
+      - data
+      properties:
+        id:
+          type: integer
+          minimum: 1
+          title: Id
+        event:
+          type: string
+          enum:
+          - run.started
+          - node.started
+          - node.completed
+          - run.completed
+          - run.failed
+          title: Event
+        data:
+          title: Data
+          description: 'JSON object for the event name: RunStartedData, NodeStartedData,
+            NodeCompletedData, RunCompletedData, or RunFailedData.'
+          type: object
+          additionalProperties: true
   securitySchemes:
     HTTPBearer:
       type: http

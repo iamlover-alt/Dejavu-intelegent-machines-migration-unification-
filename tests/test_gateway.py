@@ -83,24 +83,13 @@ def test_code_review_run_persists_an_episode_and_streams_nodes(client: TestClien
         assert stream.status_code == 200
         assert stream.headers["content-type"].startswith("text/event-stream")
         payload = "".join(stream.iter_text())
-    nodes = []
-    status = None
-    for block in payload.strip().split("\n\n"):
-        event_name = ""
-        data = ""
-        for line in block.splitlines():
-            if line.startswith("event: "):
-                event_name = line.removeprefix("event: ")
-            if line.startswith("data: "):
-                data = line.removeprefix("data: ")
-        parsed = json.loads(data)
-        if event_name == "node":
-            nodes.append(parsed["node"])
-        if event_name == "status":
-            status = parsed
-    assert nodes == ["supervisor", "router", "code_review", "episode_writer"]
-    assert status["status"] == "succeeded"
-    episode_id = status["episode_id"]
+    frames = _frames(payload)
+    assert [frame["id"] for frame in frames] == list(range(1, len(frames) + 1))
+    assert frames[0]["event"] == "run.started"
+    completed = [frame["data"]["node"] for frame in frames if frame["event"] == "node.completed"]
+    assert completed == ["supervisor", "router", "code_review", "episode_writer"]
+    assert frames[-1]["event"] == "run.completed"
+    episode_id = frames[-1]["data"]["episode_id"]
 
     run = client.get(f"/v1/runs/{run_id}", headers=_auth(token))
     assert run.status_code == 200
@@ -124,6 +113,94 @@ def test_code_review_run_persists_an_episode_and_streams_nodes(client: TestClien
         "episode_writer",
     }
     assert episode_body["inputs"]["repo"] == "demo"
+
+
+def _frames(payload: str) -> list[dict]:
+    frames = []
+    for block in payload.strip().split("\n\n"):
+        if not block.strip():
+            continue
+        event_id = None
+        event_name = ""
+        data = ""
+        for line in block.splitlines():
+            if line.startswith("id: "):
+                event_id = int(line.removeprefix("id: "))
+            elif line.startswith("event: "):
+                event_name = line.removeprefix("event: ")
+            elif line.startswith("data: "):
+                data = line.removeprefix("data: ")
+        frames.append({"id": event_id, "event": event_name, "data": json.loads(data)})
+    return frames
+
+
+def test_event_stream_resumes_after_last_event_id(client: TestClient, gateway_app):
+    token = _mint(gateway_app)
+    created = client.post(
+        "/v1/runs",
+        headers=_auth(token),
+        json={"task_type": "code_review", "input": {"diff": SAMPLE_DIFF}},
+    )
+    run_id = created.json()["run_id"]
+    with client.stream("GET", f"/v1/runs/{run_id}/events", headers=_auth(token)) as stream:
+        full = _frames("".join(stream.iter_text()))
+    assert full[-1]["event"] == "run.completed"
+    midpoint = full[2]["id"]
+    with client.stream(
+        "GET",
+        f"/v1/runs/{run_id}/events",
+        headers={**_auth(token), "Last-Event-ID": str(midpoint)},
+    ) as stream:
+        resumed = _frames("".join(stream.iter_text()))
+    assert [frame["id"] for frame in resumed] == [frame["id"] for frame in full if frame["id"] > midpoint]
+    with client.stream(
+        "GET",
+        f"/v1/runs/{run_id}/events",
+        headers={**_auth(token), "Last-Event-ID": "99999"},
+    ) as stream:
+        replayed = _frames("".join(stream.iter_text()))
+    assert [frame["id"] for frame in replayed] == [frame["id"] for frame in full]
+    with client.stream(
+        "GET",
+        f"/v1/runs/{run_id}/events",
+        headers={**_auth(token), "Last-Event-ID": "not-an-id"},
+    ) as stream:
+        again = _frames("".join(stream.iter_text()))
+    assert [frame["id"] for frame in again] == [frame["id"] for frame in full]
+
+
+def test_nullable_contract_uses_type_arrays(gateway_app):
+    schema = gateway_app.openapi()
+    events = schema["paths"]["/v1/runs/{run_id}/events"]["get"]["responses"]["200"]
+    assert "text/event-stream" in events["content"]
+    assert "application/json" not in events["content"]
+    names = schema["components"]["schemas"]
+    for name in (
+        "RunStartedData",
+        "NodeStartedData",
+        "NodeCompletedData",
+        "RunCompletedData",
+        "RunFailedData",
+        "RunEvent",
+    ):
+        assert name in names
+    status = names["RunStatusResponse"]
+    for field in ("result", "episode_id", "client_ref", "error"):
+        assert "null" in status["properties"][field]["type"]
+        assert "anyOf" not in status["properties"][field]
+        assert field not in status["required"]
+    page = names["AgentPage"]
+    assert "null" in page["properties"]["next_cursor"]["type"]
+    assert "next_cursor" not in page["required"]
+    created = names["CreateRunRequest"]
+    assert "null" in created["properties"]["client_ref"]["type"]
+    assert "client_ref" not in created.get("required", [])
+    cursor = schema["paths"]["/v1/agents"]["get"]["parameters"]
+    cursor_schema = next(item["schema"] for item in cursor if item["name"] == "cursor")
+    assert "null" in cursor_schema["type"]
+    assert "anyOf" not in cursor_schema
+    dumped = json.dumps(schema)
+    assert '{"type": "null"}' not in dumped
 
 
 def test_other_clients_cannot_read_the_run(client: TestClient, gateway_app):

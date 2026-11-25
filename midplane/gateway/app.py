@@ -16,7 +16,7 @@ from base64 import urlsafe_b64decode, urlsafe_b64encode
 from pathlib import Path
 from typing import Literal
 
-from fastapi import Depends, FastAPI, Query, Request
+from fastapi import Depends, FastAPI, Header, Query, Request
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -24,6 +24,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field
 
 from midplane.gateway.errors import APIError
+from midplane.gateway.openapi_contract import apply_contract
 from midplane.gateway.keys import hash_token, pepper_from_env
 from midplane.gateway.limiter import RateLimiter
 from midplane.gateway.store import GatewayStore, KeyRecord, RunRecord, utc_now
@@ -74,13 +75,18 @@ class CreateRunResponse(BaseModel):
 
 
 class RunStatusResponse(BaseModel):
+    """Nullable fields are sent as JSON null and may also be omitted.
+
+    result, episode_id, client_ref, and error use type [value, "null"] and are not required.
+    """
+
     run_id: str
     status: Literal["queued", "running", "succeeded", "failed"]
-    result: dict | None
-    episode_id: str | None
     task_type: str
-    client_ref: str | None
-    error: str | None
+    result: dict | None = None
+    episode_id: str | None = None
+    client_ref: str | None = None
+    error: str | None = None
 
 
 class EpisodeResponse(BaseModel):
@@ -105,8 +111,10 @@ class Agent(BaseModel):
 
 
 class AgentPage(BaseModel):
+    """next_cursor is JSON null when there is no next page. The key is sent. It may also be omitted."""
+
     data: list[Agent]
-    next_cursor: str | None
+    next_cursor: str | None = None
     limit: int
 
 
@@ -151,9 +159,31 @@ def _error_response(request: Request, error: APIError) -> JSONResponse:
     return JSONResponse(status_code=error.status_code, content=error.body(_request_id(request)), headers=headers)
 
 
-def _format_sse(event_name: str, payload: dict, event_id: int) -> str:
-    data = json.dumps(payload, separators=(",", ":"), sort_keys=True)
-    return f"id: {event_id}\nevent: {event_name}\ndata: {data}\n\n"
+def _format_sse(event: dict) -> str:
+    data = json.dumps(event["data"], separators=(",", ":"), sort_keys=True)
+    return f"id: {event['id']}\nevent: {event['event']}\ndata: {data}\n\n"
+
+
+def _record_event(gateway: GatewayStore, run_id: str, name: str, data: dict) -> None:
+    current = gateway.get_run(run_id)
+    previous = current.events if current is not None else []
+    next_id = int(previous[-1]["id"]) + 1 if previous else 1
+    gateway.append_event(run_id, {"id": next_id, "event": name, "data": data})
+
+
+def _resume_after(events: list, header: str | None) -> int:
+    """Return the last id the client has. Unknown ids replay from the start."""
+
+    if header is None or not str(header).strip():
+        return 0
+    try:
+        requested = int(str(header).strip())
+    except ValueError:
+        return 0
+    known = {int(event["id"]) for event in events if isinstance(event, dict) and "id" in event}
+    if requested in known:
+        return requested
+    return 0
 
 
 def _run_body(record: RunRecord) -> RunStatusResponse:
@@ -197,6 +227,15 @@ def create_app(
     app.state.episodes = episodes
     app.state.limiter = limiter
     app.state.pepper = key_pepper
+
+    def custom_openapi():
+        if app.openapi_schema:
+            return app.openapi_schema
+        schema = FastAPI.openapi(app)
+        app.openapi_schema = apply_contract(schema)
+        return app.openapi_schema
+
+    app.openapi = custom_openapi
 
     @app.middleware("http")
     async def request_ids(request: Request, call_next):
@@ -266,6 +305,13 @@ def create_app(
 
     def _execute(run_id: str, payload: dict) -> None:
         gateway.mark_running(run_id)
+        observed = utc_now()
+        _record_event(
+            gateway,
+            run_id,
+            "run.started",
+            {"run_id": run_id, "task_type": "code_review", "at": observed},
+        )
         worker_episodes = None
         try:
             worker_episodes = open_store(url)
@@ -280,20 +326,63 @@ def create_app(
                 store=worker_episodes,
             ):
                 if event["type"] == "node":
-                    gateway.append_event(
+                    at = utc_now()
+                    _record_event(gateway, run_id, "node.started", {"node": event["node"], "at": at})
+                    _record_event(
+                        gateway,
                         run_id,
-                        {"node": event["node"], "status": event["status"], "at": utc_now()},
+                        "node.completed",
+                        {"node": event["node"], "status": "completed", "at": at},
                     )
                 elif event["type"] == "done":
                     succeeded = event["outcome"] == "success"
+                    episode_id = event["episode_id"]
+                    at = utc_now()
+                    if succeeded:
+                        _record_event(
+                            gateway,
+                            run_id,
+                            "run.completed",
+                            {
+                                "run_id": run_id,
+                                "status": "succeeded",
+                                "episode_id": episode_id,
+                                "at": at,
+                            },
+                        )
+                    else:
+                        _record_event(
+                            gateway,
+                            run_id,
+                            "run.failed",
+                            {
+                                "run_id": run_id,
+                                "status": "failed",
+                                "episode_id": episode_id,
+                                "error": "The graph run finished with outcome=error.",
+                                "at": at,
+                            },
+                        )
                     gateway.finish_run(
                         run_id,
                         status="succeeded" if succeeded else "failed",
                         result=event["output"] if succeeded else None,
-                        episode_id=event["episode_id"],
+                        episode_id=episode_id,
                         error_message=None if succeeded else "The graph run finished with outcome=error.",
                     )
         except Exception as exc:
+            _record_event(
+                gateway,
+                run_id,
+                "run.failed",
+                {
+                    "run_id": run_id,
+                    "status": "failed",
+                    "episode_id": None,
+                    "error": str(exc),
+                    "at": utc_now(),
+                },
+            )
             gateway.finish_run(
                 run_id,
                 status="failed",
@@ -328,38 +417,29 @@ def create_app(
         return _run_body(_owned_run(run_id, key))
 
     @app.get("/v1/runs/{run_id}/events", tags=["runs"])
-    def run_events(run_id: str, key: KeyRecord = Depends(require_key)):
+    def run_events(
+        run_id: str,
+        key: KeyRecord = Depends(require_key),
+        last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
+    ):
         _owned_run(run_id, key)
 
         def generate():
-            sent = 0
-            event_id = 0
+            record = gateway.get_run(run_id)
+            seen = _resume_after(record.events if record is not None else [], last_event_id)
             deadline = time.monotonic() + 120
             while True:
                 record = gateway.get_run(run_id)
                 if record is None:
-                    event_id += 1
-                    yield _format_sse("status", {"status": "failed", "episode_id": None}, event_id)
                     return
-                while sent < len(record.events):
-                    event_id += 1
-                    yield _format_sse("node", record.events[sent], event_id)
-                    sent += 1
-                if record.status in {"succeeded", "failed"}:
-                    event_id += 1
-                    yield _format_sse(
-                        "status",
-                        {"status": record.status, "episode_id": record.episode_id, "error": record.error_message},
-                        event_id,
-                    )
+                for event in record.events:
+                    if int(event["id"]) <= seen:
+                        continue
+                    yield _format_sse(event)
+                    seen = int(event["id"])
+                if record.status in {"succeeded", "failed"} and all(int(event["id"]) <= seen for event in record.events):
                     return
                 if time.monotonic() > deadline:
-                    event_id += 1
-                    yield _format_sse(
-                        "status",
-                        {"status": "failed", "episode_id": None, "error": "Timed out waiting for the run."},
-                        event_id,
-                    )
                     return
                 time.sleep(0.05)
 

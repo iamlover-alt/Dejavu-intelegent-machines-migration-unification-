@@ -9,3 +9,4 @@ if [ ! -e "$link" ]; then
   ln -s ../../../../openapi/midplane-v0.yaml "$link"
 fi
 swift build --package-path clients/swift
+swift test --package-path clients/swift

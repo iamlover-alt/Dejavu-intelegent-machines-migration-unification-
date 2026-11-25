@@ -48,13 +48,56 @@ python -m midplane.gateway.keys revoke --key-id key_...
 | `GET /healthz` | none | `{"status": "ok"}` |
 | `POST /v1/runs` | bearer | Body `{task_type, input, client_ref?}`. v0 accepts `task_type=code_review` and `input.diff`. Response `{run_id, status}` with status `queued`. |
 | `GET /v1/runs/{run_id}` | bearer | `queued`, `running`, `succeeded`, or `failed`, plus `result`, `episode_id`, and `error`. |
-| `GET /v1/runs/{run_id}/events` | bearer | Server-Sent Events. `node` events name each finished graph node. A final `status` event carries the terminal state and `episode_id`. |
+| `GET /v1/runs/{run_id}/events` | bearer | `text/event-stream`. Frames are `run.started`, `node.started`, `node.completed`, `run.completed`, and `run.failed`. |
 | `GET /v1/episodes/{episode_id}` | bearer | The persisted episode, including `trace` and `quality_score`. |
 | `GET /v1/agents` | bearer | Static roster: name, title, status. |
 
 A key is scoped to its client id. `ios-dev` cannot read a run created by another client. The response is `404`, so the other client's ids are not confirmed.
 
 `episode_id` is the graph run id. The episode row is written even when the graph outcome is `error`; the HTTP status is then `failed` and `episode_id` is still set. A crash before the episode writer leaves `episode_id` null.
+
+## Run events
+
+`GET /v1/runs/{run_id}/events` returns `text/event-stream`. Each frame is:
+
+```text
+id: 1
+event: run.started
+data: {"at":"...","run_id":"...","task_type":"code_review"}
+
+```
+
+`id` is a decimal integer stored on the run. It starts at 1 and increases by 1 for each frame. It is not reset per connection.
+
+`event` is one of:
+
+| Event | `data` schema | Payload |
+| --- | --- | --- |
+| `run.started` | `RunStartedData` | `run_id`, `task_type`, `at` |
+| `node.started` | `NodeStartedData` | `node`, `at` |
+| `node.completed` | `NodeCompletedData` | `node`, `status` (`completed`), `at` |
+| `run.completed` | `RunCompletedData` | `run_id`, `status` (`succeeded`), `episode_id`, `at` |
+| `run.failed` | `RunFailedData` | `run_id`, `status` (`failed`), `episode_id`, `error`, `at` |
+
+The graph reports a node when that node returns. The gateway then appends `node.started` and `node.completed` for it, in that order, with the same `at` timestamp.
+
+Resume with the request header `Last-Event-ID`. The server replays stored frames whose `id` is greater than that value, then waits for new ones if the run is still going. If the header is missing, not an integer, or not an id stored for this run, the server replays the full log.
+
+`episode_id` and `error` on the terminal payloads are JSON null when there is no value, and the keys are still sent.
+
+## Nullability
+
+swift-openapi-generator 1.14 drops `anyOf` with `null`. These fields use `type: [<type>, "null"]` and are not in `required`, so a client can omit them. The server still sends the response keys, using JSON null when there is no value.
+
+| Field | Where | Absent | JSON null | Server |
+| --- | --- | --- | --- | --- |
+| `client_ref` | `POST /v1/runs` body | allowed | allowed, stored as no reference | response always includes the key |
+| `cursor` | `GET /v1/agents` query | omit the query | schema allows it; clients should omit it | query is not echoed |
+| `next_cursor` | `AgentPage` | allowed | allowed | key is sent; null when the page is done |
+| `result` | `RunStatusResponse` | allowed | allowed | key is sent; null until the run succeeds |
+| `episode_id` | `RunStatusResponse`, `RunCompletedData`, `RunFailedData` | allowed | allowed | key is sent; null until an episode row exists |
+| `client_ref` | `RunStatusResponse` | allowed | allowed | key is sent; null when the request omitted it |
+| `error` | `RunStatusResponse`, `RunFailedData` | allowed | allowed | key is sent; null when the run did not fail |
 
 ## Errors, request ids, pagination
 
