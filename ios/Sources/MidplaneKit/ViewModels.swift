@@ -131,6 +131,7 @@ public enum CreateRunLoader {
         }
         var actions: [CreateRunAction] = [.submitStarted]
         do {
+            let clientRef = state.clientRef.trimmingCharacters(in: .whitespacesAndNewlines)
             let created = try await client.createRun(
                 Components.Schemas.CreateRunRequest(
                     taskType: .codeReview,
@@ -140,9 +141,9 @@ public enum CreateRunLoader {
                             ? nil : state.repo,
                         instructions: state.instructions.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                             ? nil : state.instructions
-                    )
-                ),
-                clientRef: state.clientRef
+                    ),
+                    clientRef: clientRef.isEmpty ? nil : clientRef
+                )
             )
             actions.append(.created(runID: created.runId, status: created.status.rawValue))
         } catch let failure as GatewayFailure {
@@ -174,6 +175,8 @@ public struct RunDetailState: Equatable, Sendable {
     public var episodeID: String?
     public var events: [RunStreamEvent]
     public var failure: GatewayFailure?
+    /// The next event decides whether a reconnect appends or replaces the timeline.
+    public var expectingResume: Bool
 
     public static let idle = RunDetailState(
         phase: .idle,
@@ -184,13 +187,14 @@ public struct RunDetailState: Equatable, Sendable {
         runError: nil,
         episodeID: nil,
         events: [],
-        failure: nil
+        failure: nil,
+        expectingResume: false
     )
 }
 
 public enum RunDetailAction: Equatable, Sendable {
-    case loadStarted
-    case snapshot(RunRecord)
+    case loadStarted(resuming: Bool)
+    case snapshot(Components.Schemas.RunStatusResponse)
     case event(RunStreamEvent)
     case streamEnded
     case failed(GatewayFailure)
@@ -200,37 +204,43 @@ public enum RunDetailReducer {
     public static func reduce(_ state: RunDetailState, _ action: RunDetailAction) -> RunDetailState {
         var state = state
         switch action {
-        case .loadStarted:
-            state.phase = .loading
+        case .loadStarted(let resuming):
             state.failure = nil
-            state.events = []
+            if resuming {
+                state.phase = .streaming
+                state.expectingResume = true
+            } else {
+                state.phase = .loading
+                state.events = []
+                state.expectingResume = false
+            }
         case .snapshot(let record):
-            state.status = record.response.status.rawValue
-            state.taskType = record.response.taskType
+            state.status = record.status.rawValue
+            state.taskType = record.taskType
             state.clientRef = record.clientRef
-            state.resultJSON = record.resultJSON
-            state.runError = record.errorMessage
-            if let episodeID = record.episodeID {
+            state.resultJSON = record.result.map { JSONDisplay.pretty($0) }
+            state.runError = record.error
+            if let episodeID = record.episodeId {
                 state.episodeID = episodeID
             }
             if state.phase == .loading {
                 state.phase = .streaming
             }
         case .event(let event):
-            state.events.append(event)
-            state.phase = .streaming
-            if event.name == "status" {
-                let fields = StatusEventFields.parse(event.data)
-                if let status = fields.status {
-                    state.status = status
+            if state.expectingResume {
+                state.expectingResume = false
+                let incoming = event.id.flatMap(Int.init)
+                let previous = state.events.compactMap { $0.id.flatMap(Int.init) }.max()
+                if let incoming, let previous, incoming > previous {
+                    state.events.append(event)
+                } else {
+                    state.events = [event]
                 }
-                if let episodeID = fields.episodeID {
-                    state.episodeID = episodeID
-                }
-                if let error = fields.error {
-                    state.runError = error
-                }
+            } else {
+                state.events.append(event)
             }
+            state.phase = .streaming
+            apply(event, to: &state)
         case .streamEnded:
             state.phase = .finished
         case .failed(let failure):
@@ -243,17 +253,39 @@ public enum RunDetailReducer {
     public static func fold(_ actions: [RunDetailAction]) -> RunDetailState {
         actions.reduce(.idle, reduce)
     }
+
+    private static func apply(_ event: RunStreamEvent, to state: inout RunDetailState) {
+        switch RunEventDecoder.decode(name: event.name, data: event.data) {
+        case .runStarted, .nodeStarted, .nodeCompleted:
+            if state.status != "succeeded" && state.status != "failed" {
+                state.status = "running"
+            }
+        case .runCompleted(let payload):
+            state.status = "succeeded"
+            state.episodeID = payload.episodeId ?? state.episodeID
+        case .runFailed(let payload):
+            state.status = "failed"
+            state.episodeID = payload.episodeId ?? state.episodeID
+            state.runError = payload.error ?? state.runError
+        case nil:
+            break
+        }
+    }
 }
 
 public enum RunDetailLoader {
-    public static func load(runID: String, client: any MidplaneClient) -> AsyncStream<RunDetailAction> {
+    public static func load(
+        runID: String,
+        client: any MidplaneClient,
+        lastEventID: String? = nil
+    ) -> AsyncStream<RunDetailAction> {
         AsyncStream { continuation in
             let task = Task {
-                continuation.yield(.loadStarted)
+                continuation.yield(.loadStarted(resuming: lastEventID != nil))
                 do {
                     let record = try await client.getRun(id: runID)
                     continuation.yield(.snapshot(record))
-                    let stream = await client.runEvents(id: runID)
+                    let stream = await client.runEvents(id: runID, lastEventID: lastEventID)
                     for try await event in stream {
                         continuation.yield(.event(event))
                     }
@@ -320,9 +352,9 @@ public enum AgentsReducer {
         return state
     }
 
-    public static func apply(_ state: AgentsState, page: AgentList, appending: Bool) -> AgentsState {
+    public static func apply(_ state: AgentsState, page: Components.Schemas.AgentPage, appending: Bool) -> AgentsState {
         var state = state
-        let rows = page.page.data.map { AgentsState.Row(name: $0.name, title: $0.title, status: $0.status) }
+        let rows = page.data.map { AgentsState.Row(name: $0.name, title: $0.title, status: $0.status) }
         state.rows = appending ? state.rows + rows : rows
         state.nextCursor = page.nextCursor
         state.isLoading = false

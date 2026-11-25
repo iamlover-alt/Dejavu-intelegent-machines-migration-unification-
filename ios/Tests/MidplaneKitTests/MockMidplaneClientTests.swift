@@ -8,15 +8,15 @@ final class MockMidplaneClientTests: XCTestCase {
         let health = try await client.healthz()
         XCTAssertEqual(health.status, .ok)
 
-        let created = try await client.createRun(sampleRequest(), clientRef: "draft-1")
+        let created = try await client.createRun(sampleRequest(clientRef: "draft-1"))
         XCTAssertEqual(created.status, .queued)
         XCTAssertFalse(created.runId.isEmpty)
 
         let run = try await client.getRun(id: created.runId)
-        XCTAssertEqual(run.response.status, .queued)
-        XCTAssertEqual(run.response.taskType, "code_review")
+        XCTAssertEqual(run.status, .queued)
+        XCTAssertEqual(run.taskType, "code_review")
         XCTAssertEqual(run.clientRef, "draft-1")
-        XCTAssertNil(run.episodeID)
+        XCTAssertNil(run.episodeId)
         do {
             _ = try await client.getEpisode(id: created.runId)
             XCTFail("episode is written after the stream finishes")
@@ -30,8 +30,7 @@ final class MockMidplaneClientTests: XCTestCase {
         let client = MockMidplaneClient()
         do {
             _ = try await client.createRun(
-                Components.Schemas.CreateRunRequest(taskType: .codeReview, input: .init(diff: "  ")),
-                clientRef: nil
+                Components.Schemas.CreateRunRequest(taskType: .codeReview, input: .init(diff: "  "))
             )
             XCTFail("expected validation")
         } catch let failure as GatewayFailure {
@@ -39,7 +38,7 @@ final class MockMidplaneClientTests: XCTestCase {
             XCTAssertEqual(failure.statusCode, 422)
         }
         do {
-            _ = try await client.createRun(sampleRequest(), clientRef: String(repeating: "a", count: 201))
+            _ = try await client.createRun(sampleRequest(clientRef: String(repeating: "a", count: 201)))
             XCTFail("expected validation")
         } catch let failure as GatewayFailure {
             XCTAssertEqual(failure.code, "validation_error")
@@ -48,17 +47,27 @@ final class MockMidplaneClientTests: XCTestCase {
 
     func testEventStreamThenEpisode() async throws {
         let client = MockMidplaneClient()
-        let created = try await client.createRun(sampleRequest(diff: sampleDiff), clientRef: nil)
+        let created = try await client.createRun(sampleRequest(diff: sampleDiff))
         var names: [String] = []
-        let stream = await client.runEvents(id: created.runId)
+        let stream = await client.runEvents(id: created.runId, lastEventID: nil)
         for try await event in stream {
             names.append(event.name ?? "")
         }
-        XCTAssertEqual(names, ["node", "node", "node", "node", "status"])
+        XCTAssertEqual(
+            names,
+            [
+                "run.started",
+                "node.started", "node.completed",
+                "node.started", "node.completed",
+                "node.started", "node.completed",
+                "node.started", "node.completed",
+                "run.completed",
+            ]
+        )
 
         let run = try await client.getRun(id: created.runId)
-        XCTAssertEqual(run.response.status, .succeeded)
-        let episodeID = try XCTUnwrap(run.episodeID)
+        XCTAssertEqual(run.status, .succeeded)
+        let episodeID = try XCTUnwrap(run.episodeId)
         let episode = try await client.getEpisode(id: episodeID)
         XCTAssertEqual(episode.source, "app")
         XCTAssertEqual(episode.outcome, "success")
@@ -69,6 +78,36 @@ final class MockMidplaneClientTests: XCTestCase {
         XCTAssertTrue(outputs.contains("findings"))
         XCTAssertTrue(outputs.contains("block"))
         XCTAssertTrue(JSONDisplay.pretty(episode.trace).contains("episode_writer"))
+    }
+
+    func testResumeSkipsKnownIDsAndReplaysWhenTheIDIsUnknown() async throws {
+        let client = MockMidplaneClient()
+        let created = try await client.createRun(sampleRequest())
+        var first: [RunStreamEvent] = []
+        for try await event in await client.runEvents(id: created.runId, lastEventID: nil) {
+            first.append(event)
+        }
+        XCTAssertEqual(first.map(\.id), (1 ... first.count).map(String.init))
+
+        var resumed: [String] = []
+        for try await event in await client.runEvents(id: created.runId, lastEventID: "4") {
+            resumed.append(event.id ?? "")
+        }
+        XCTAssertEqual(resumed.first, "5")
+        XCTAssertEqual(resumed.last, String(first.count))
+        XCTAssertFalse(resumed.contains("4"))
+
+        var replayed: [String] = []
+        for try await event in await client.runEvents(id: created.runId, lastEventID: "999") {
+            replayed.append(event.id ?? "")
+        }
+        XCTAssertEqual(replayed, first.map { $0.id ?? "" })
+
+        var notAnInteger: [String] = []
+        for try await event in await client.runEvents(id: created.runId, lastEventID: "nope") {
+            notAnInteger.append(event.id ?? "")
+        }
+        XCTAssertEqual(notAnInteger, first.map { $0.id ?? "" })
     }
 
     func testUnknownRunFailsWithARequestID() async throws {
@@ -86,15 +125,15 @@ final class MockMidplaneClientTests: XCTestCase {
     func testAgentsPageInRosterOrder() async throws {
         let client = MockMidplaneClient()
         let first = try await client.listAgents(limit: 4, cursor: nil)
-        XCTAssertEqual(first.page.limit, 4)
-        XCTAssertEqual(first.page.data.map(\.title), ["Bot Builder", "Storefront", "Front Desk", "Grok Bot"])
+        XCTAssertEqual(first.limit, 4)
+        XCTAssertEqual(first.data.map(\.title), ["Bot Builder", "Storefront", "Front Desk", "Grok Bot"])
         let cursor = try XCTUnwrap(first.nextCursor)
         let second = try await client.listAgents(limit: 4, cursor: cursor)
-        XCTAssertEqual(second.page.data.first?.title, "Money Desk")
+        XCTAssertEqual(second.data.first?.title, "Money Desk")
         let whole = try await client.listAgents(limit: nil, cursor: nil)
-        XCTAssertEqual(whole.page.data.count, 10)
+        XCTAssertEqual(whole.data.count, 10)
         XCTAssertNil(whole.nextCursor)
-        XCTAssertEqual(whole.page.data.last?.name, "ios-studio")
+        XCTAssertEqual(whole.data.last?.name, "ios-studio")
         do {
             _ = try await client.listAgents(limit: 4, cursor: "not-a-cursor")
             XCTFail("expected invalid cursor")
@@ -110,10 +149,14 @@ final class MockMidplaneClientTests: XCTestCase {
         }
     }
 
-    private func sampleRequest(diff: String = "+print(\"ok\")\n") -> Components.Schemas.CreateRunRequest {
+    private func sampleRequest(
+        diff: String = "+print(\"ok\")\n",
+        clientRef: String? = nil
+    ) -> Components.Schemas.CreateRunRequest {
         Components.Schemas.CreateRunRequest(
             taskType: .codeReview,
-            input: .init(diff: diff, repo: "demo", instructions: "Look for bugs.")
+            input: .init(diff: diff, repo: "demo", instructions: "Look for bugs."),
+            clientRef: clientRef
         )
     }
 

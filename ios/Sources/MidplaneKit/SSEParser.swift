@@ -1,10 +1,9 @@
 import Foundation
 
-/// One Server-Sent Events frame.
+/// One Server-Sent Events frame from `GET /v1/runs/{id}/events`.
 ///
-/// The gateway document's events response is `application/json` with an empty schema,
-/// so this type is the HTML event-stream framing, not a generated schema.
-/// `CONTRACT_QUESTIONS.md` proposes documenting the stream.
+/// The generated client returns that body as raw bytes. Payload schemas are
+/// decoded separately by `RunEventDecoder`.
 public struct RunStreamEvent: Hashable, Sendable {
     public var id: String?
     public var name: String?
@@ -21,9 +20,8 @@ public struct RunStreamEvent: Hashable, Sendable {
 
 /// Incremental parser for the HTML Server-Sent Events wire format.
 ///
-/// Event ids follow the HTML rule: the last id stays in effect until a later
-/// frame replaces it. The gateway YAML does not define `Last-Event-ID`, and this
-/// parser does not reconnect by itself.
+/// The gateway stores decimal ids on the run. Reconnection is the caller's job:
+/// send the last id as `Last-Event-ID`. This parser only splits frames.
 public struct SSEParser: Sendable {
     private var pending: [UInt8] = []
     private var dataLines: [String] = []
@@ -34,7 +32,11 @@ public struct SSEParser: Sendable {
     public init() {}
 
     public mutating func append(_ chunk: String) -> [RunStreamEvent] {
-        pending.append(contentsOf: chunk.utf8)
+        append(bytes: chunk.utf8)
+    }
+
+    public mutating func append<Bytes: Sequence>(bytes: Bytes) -> [RunStreamEvent] where Bytes.Element == UInt8 {
+        pending.append(contentsOf: bytes)
         var events: [RunStreamEvent] = []
         while let line = nextLine() {
             if line.isEmpty {

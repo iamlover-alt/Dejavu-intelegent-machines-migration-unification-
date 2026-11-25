@@ -45,8 +45,7 @@ final class ViewModelTests: XCTestCase {
     func testRunDetailCollectsNodeEventsThenEpisode() async throws {
         let client = MockMidplaneClient()
         let created = try await client.createRun(
-            .init(taskType: .codeReview, input: .init(diff: "+print(\"ok\")\n")),
-            clientRef: nil
+            .init(taskType: .codeReview, input: .init(diff: "+print(\"ok\")\n"))
         )
         var actions: [RunDetailAction] = []
         for await action in RunDetailLoader.load(runID: created.runId, client: client) {
@@ -55,11 +54,13 @@ final class ViewModelTests: XCTestCase {
         let state = RunDetailReducer.fold(actions)
         XCTAssertEqual(state.phase, .finished)
         XCTAssertEqual(state.status, "succeeded")
-        XCTAssertEqual(state.events.map(\.name), ["node", "node", "node", "node", "status"])
-        XCTAssertEqual(
-            state.events.dropLast().compactMap { nodeName($0.data) },
-            ["supervisor", "router", "code_review", "episode_writer"]
-        )
+        XCTAssertEqual(state.events.first?.name, "run.started")
+        XCTAssertEqual(state.events.last?.name, "run.completed")
+        let completedNodes = state.events.compactMap { event -> String? in
+            guard event.name == "node.completed" else { return nil }
+            return nodeName(event.data)
+        }
+        XCTAssertEqual(completedNodes, ["supervisor", "router", "code_review", "episode_writer"])
         XCTAssertEqual(state.episodeID, created.runId)
         XCTAssertNil(state.failure)
     }
@@ -73,7 +74,7 @@ final class ViewModelTests: XCTestCase {
         XCTAssertEqual(state.phase, .failed)
         XCTAssertEqual(state.failure?.code, "not_found")
         XCTAssertNotNil(state.failure?.requestID)
-        XCTAssertEqual(actions.first, .loadStarted)
+        XCTAssertEqual(actions.first, .loadStarted(resuming: false))
     }
 
     func testAgentsPagingAppendsAndClearsTheCursor() async throws {
@@ -104,10 +105,9 @@ final class ViewModelTests: XCTestCase {
     func testEpisodeDetailShowsTheRecordedFields() async throws {
         let client = MockMidplaneClient()
         let created = try await client.createRun(
-            .init(taskType: .codeReview, input: .init(diff: "+print(\"ok\")\n")),
-            clientRef: nil
+            .init(taskType: .codeReview, input: .init(diff: "+print(\"ok\")\n"))
         )
-        for try await _ in await client.runEvents(id: created.runId) {}
+        for try await _ in await client.runEvents(id: created.runId, lastEventID: nil) {}
         let actions = await EpisodeDetailLoader.load(id: created.runId, client: client)
         let state = EpisodeDetailReducer.fold(actions)
         XCTAssertEqual(state.phase, .loaded)
@@ -130,6 +130,22 @@ final class ViewModelTests: XCTestCase {
         state = DebugSettingsReducer.reduce(state, .apiKeyCleared)
         XCTAssertFalse(state.hasAPIKey)
         XCTAssertEqual(state.baseURL, "http://localhost:8000")
+    }
+
+    func testResumeAppendsNewerIDsAndReplacesTheTimelineOnAFullReplay() {
+        let first = RunStreamEvent(id: "1", name: "run.started", data: #"{"at":"t","run_id":"r","task_type":"code_review"}"#)
+        let second = RunStreamEvent(id: "2", name: "node.started", data: #"{"at":"t","node":"supervisor"}"#)
+        let third = RunStreamEvent(id: "3", name: "node.completed", data: #"{"at":"t","node":"supervisor","status":"completed"}"#)
+        var state = RunDetailReducer.fold([.event(first), .event(second)])
+        state = RunDetailReducer.reduce(state, .loadStarted(resuming: true))
+        state = RunDetailReducer.reduce(state, .event(third))
+        XCTAssertEqual(state.events.map(\.id), ["1", "2", "3"])
+        XCTAssertFalse(state.expectingResume)
+
+        state = RunDetailReducer.reduce(state, .loadStarted(resuming: true))
+        state = RunDetailReducer.reduce(state, .event(first))
+        state = RunDetailReducer.reduce(state, .event(second))
+        XCTAssertEqual(state.events.map(\.id), ["1", "2"])
     }
 
     func testFactorySwitchesBetweenMockAndLive() {

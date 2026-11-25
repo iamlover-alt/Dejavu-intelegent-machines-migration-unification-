@@ -20,8 +20,7 @@ public actor MockMidplaneClient: MidplaneClient {
     }
 
     public func createRun(
-        _ body: Components.Schemas.CreateRunRequest,
-        clientRef: String?
+        _ body: Components.Schemas.CreateRunRequest
     ) async throws -> Components.Schemas.CreateRunResponse {
         let requestID = nextRequestID()
         let diff = body.input.diff.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -33,7 +32,7 @@ public actor MockMidplaneClient: MidplaneClient {
                 requestID: requestID
             )
         }
-        let ref = clientRef?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let ref = body.clientRef?.trimmingCharacters(in: .whitespacesAndNewlines)
         if let ref, ref.count > 200 {
             throw GatewayFailure(
                 statusCode: 422,
@@ -57,7 +56,7 @@ public actor MockMidplaneClient: MidplaneClient {
         return Components.Schemas.CreateRunResponse(runId: runID, status: .queued)
     }
 
-    public func getRun(id: String) async throws -> RunRecord {
+    public func getRun(id: String) async throws -> Components.Schemas.RunStatusResponse {
         let requestID = nextRequestID()
         guard let run = runs[id] else {
             throw GatewayFailure.notFound("Run not found.", requestID: requestID)
@@ -73,7 +72,7 @@ public actor MockMidplaneClient: MidplaneClient {
         return episode
     }
 
-    public func listAgents(limit: Int?, cursor: String?) async throws -> AgentList {
+    public func listAgents(limit: Int?, cursor: String?) async throws -> Components.Schemas.AgentPage {
         let requestID = nextRequestID()
         let pageLimit = limit ?? 50
         if pageLimit < 1 || pageLimit > 100 {
@@ -102,13 +101,10 @@ public actor MockMidplaneClient: MidplaneClient {
         let agents = window.map {
             Components.Schemas.Agent(name: $0.name, title: $0.title, status: $0.status)
         }
-        return AgentList(
-            page: Components.Schemas.AgentPage(data: agents, limit: pageLimit),
-            nextCursor: next
-        )
+        return Components.Schemas.AgentPage(data: agents, nextCursor: next, limit: pageLimit)
     }
 
-    public func runEvents(id: String) async -> AsyncThrowingStream<RunStreamEvent, Error> {
+    public func runEvents(id: String, lastEventID: String?) async -> AsyncThrowingStream<RunStreamEvent, Error> {
         let requestID = nextRequestID()
         guard runs[id] != nil else {
             return AsyncThrowingStream { continuation in
@@ -118,7 +114,7 @@ public actor MockMidplaneClient: MidplaneClient {
         let delay = eventDelayNanoseconds
         return AsyncThrowingStream { continuation in
             let task = Task {
-                let events = self.events(for: id)
+                let events = self.events(for: id, lastEventID: lastEventID)
                 do {
                     for event in events {
                         try Task.checkCancellation()
@@ -141,13 +137,14 @@ public actor MockMidplaneClient: MidplaneClient {
         }
     }
 
-    private func events(for runID: String) -> [RunStreamEvent] {
+    private func events(for runID: String, lastEventID: String?) -> [RunStreamEvent] {
         guard let run = runs[runID] else {
             return []
         }
         let wire = Self.eventWire(runID: runID, diff: run.diff)
         var parser = SSEParser()
-        return parser.append(wire)
+        let frames = parser.append(wire)
+        return Array(frames.dropFirst(EventResume.startIndex(events: frames, lastEventID: lastEventID)))
     }
 
     private func advance(runID: String, event: RunStreamEvent) {
@@ -155,21 +152,26 @@ public actor MockMidplaneClient: MidplaneClient {
             return
         }
         run.yielded += 1
-        if event.name == "node" {
-            run.status = .running
-        }
-        if event.name == "status" {
-            let fields = StatusEventFields.parse(event.data)
-            if fields.status == "failed" {
-                run.status = .failed
-                run.errorMessage = fields.error
-            } else {
-                run.status = .succeeded
-                run.episodeID = fields.episodeID ?? runID
-                if let episodeID = run.episodeID {
-                    episodes[episodeID] = Self.episode(runID: runID, episodeID: episodeID, run: run)
-                }
+        switch RunEventDecoder.decode(name: event.name, data: event.data) {
+        case .runStarted, .nodeStarted, .nodeCompleted:
+            if run.status != .succeeded && run.status != .failed {
+                run.status = .running
             }
+        case .runCompleted(let payload):
+            run.status = .succeeded
+            run.episodeID = payload.episodeId ?? runID
+            if let episodeID = run.episodeID {
+                episodes[episodeID] = Self.episode(runID: runID, episodeID: episodeID, run: run)
+            }
+        case .runFailed(let payload):
+            run.status = .failed
+            run.errorMessage = payload.error
+            run.episodeID = payload.episodeId
+            if let episodeID = payload.episodeId {
+                episodes[episodeID] = Self.episode(runID: runID, episodeID: episodeID, run: run)
+            }
+        case nil:
+            break
         }
         runs[runID] = run
     }
@@ -219,19 +221,37 @@ public actor MockMidplaneClient: MidplaneClient {
     }
 
     private static func eventWire(runID: String, diff: String) -> String {
+        let stamp = "2026-11-25T00:00:00Z"
         let nodes = ["supervisor", "router", "code_review", "episode_writer"]
         var blocks: [String] = []
-        for (index, node) in nodes.enumerated() {
-            let data = #"{"at":"2026-11-21T00:00:00+00:00","node":"\#(node)","status":"completed"}"#
-            blocks.append("id: \(index + 1)\nevent: node\ndata: \(data)\n\n")
+        var nextID = 1
+        func frame(_ event: String, _ data: String) {
+            blocks.append("id: \(nextID)\nevent: \(event)\ndata: \(data)\n\n")
+            nextID += 1
         }
-        let episodeID = runID
+        frame(
+            "run.started",
+            #"{"at":"\#(stamp)","run_id":"\#(runID)","task_type":"code_review"}"#
+        )
+        for node in nodes {
+            frame("node.started", #"{"at":"\#(stamp)","node":"\#(node)"}"#)
+            frame(
+                "node.completed",
+                #"{"at":"\#(stamp)","node":"\#(node)","status":"completed"}"#
+            )
+        }
         let failed = diff.lowercased().contains("force-fail")
-        let status = failed ? "failed" : "succeeded"
-        let error = failed ? "\"The graph run finished with outcome=error.\"" : "null"
-        let episodeField = failed ? "null" : "\"\(episodeID)\""
-        let data = #"{"episode_id":\#(episodeField),"error":\#(error),"status":"\#(status)"}"#
-        blocks.append("id: \(nodes.count + 1)\nevent: status\ndata: \(data)\n\n")
+        if failed {
+            frame(
+                "run.failed",
+                #"{"at":"\#(stamp)","episode_id":null,"error":"The graph run finished with outcome=error.","run_id":"\#(runID)","status":"failed"}"#
+            )
+        } else {
+            frame(
+                "run.completed",
+                #"{"at":"\#(stamp)","episode_id":"\#(runID)","run_id":"\#(runID)","status":"succeeded"}"#
+            )
+        }
         return blocks.joined()
     }
 
@@ -301,36 +321,21 @@ private struct FixtureRun: Sendable {
     var errorMessage: String? = nil
     var yielded: Int
 
-    func record(id: String) -> RunRecord {
-        RunRecord(
-            response: Components.Schemas.RunStatusResponse(
-                runId: id,
-                status: status,
-                taskType: taskType
-            ),
-            episodeID: episodeID,
-            resultJSON: status == .succeeded ? #"{"summary":"Fixture review."}"# : nil,
+    func record(id: String) -> Components.Schemas.RunStatusResponse {
+        let result: Components.Schemas.RunStatusResponse.ResultPayload? = status == .succeeded
+            ? (try? JSONDecoder().decode(
+                Components.Schemas.RunStatusResponse.ResultPayload.self,
+                from: Data(#"{"summary":"Fixture review."}"#.utf8)
+            ))
+            : nil
+        return Components.Schemas.RunStatusResponse(
+            runId: id,
+            status: status,
+            taskType: taskType,
+            result: result,
+            episodeId: episodeID,
             clientRef: clientRef,
-            errorMessage: errorMessage
-        )
-    }
-}
-
-struct StatusEventFields: Equatable, Sendable {
-    var status: String?
-    var episodeID: String?
-    var error: String?
-
-    static func parse(_ data: String) -> StatusEventFields {
-        guard let raw = data.data(using: .utf8),
-            let object = try? JSONSerialization.jsonObject(with: raw) as? [String: Any]
-        else {
-            return StatusEventFields(status: nil, episodeID: nil, error: nil)
-        }
-        return StatusEventFields(
-            status: object["status"] as? String,
-            episodeID: object["episode_id"] as? String,
-            error: object["error"] as? String
+            error: errorMessage
         )
     }
 }

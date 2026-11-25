@@ -29,7 +29,7 @@ struct RunDetailView: View {
                 if let failure = state.failure {
                     ErrorBanner(failure: failure)
                     Button("Retry stream") {
-                        Task { await load() }
+                        Task { await load(resuming: true) }
                     }
                     .buttonStyle(.bordered)
                 }
@@ -108,10 +108,13 @@ struct RunDetailView: View {
         }
     }
 
-    private func load() async {
-        state = .idle
+    private func load(resuming: Bool = false) async {
+        let lastEventID = resuming ? state.events.compactMap(\.id).last : nil
+        if !resuming {
+            state = .idle
+        }
         let current = model.client()
-        for await action in RunDetailLoader.load(runID: runID, client: current) {
+        for await action in RunDetailLoader.load(runID: runID, client: current, lastEventID: lastEventID) {
             state = RunDetailReducer.reduce(state, action)
         }
     }

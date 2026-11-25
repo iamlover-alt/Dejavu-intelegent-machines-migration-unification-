@@ -12,9 +12,9 @@ The app targets iOS 17. The generated gateway package requires Swift 6.
 | `ios/App/Dejavu.xcodeproj` | SwiftUI app |
 | `clients/swift` | Generated `MidplaneGateway` client. The app depends on it as a local package. |
 | `openapi/midplane-v0.yaml` | Contract. Do not edit it from the iOS app. |
-| `ios/CONTRACT_QUESTIONS.md` | Gaps the YAML leaves open, and one generator limitation |
+| `ios/CONTRACT_QUESTIONS.md` | Contract details the YAML still leaves open |
 
-`MidplaneClient` is the app boundary. `LiveMidplaneClient` calls the generated client for health, create run, get run, get episode, and list agents. `MockMidplaneClient` implements the same protocol with fixture data and no network. Run events are an `AsyncThrowingStream`. The generated events operation is declared as empty JSON, so the live stream is read with `URLSession`. See the contract questions.
+`MidplaneClient` is the app boundary. `LiveMidplaneClient` calls the generated client, including the `text/event-stream` body. `MockMidplaneClient` implements the same protocol with fixture data and no network. The generator returns the event stream as bytes, so the app parses frames locally and decodes `RunStartedData`, `NodeStartedData`, `NodeCompletedData`, `RunCompletedData`, and `RunFailedData`. Reconnect sends `Last-Event-ID`. An unknown id replays the whole log.
 
 `clients/swift` generates its symbols as `public` so this package can import them. The OpenAPI file is unchanged.
 
