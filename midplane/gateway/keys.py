@@ -25,7 +25,9 @@ def pepper_from_env() -> str:
 
 
 def database_url_from_env() -> str:
-    return os.environ.get("MIDPLANE_DATABASE_URL", "sqlite:///midplane_episodes.sqlite")
+    from midplane.store import resolve_database_url
+
+    return resolve_database_url()
 
 
 def hash_token(token: str, pepper_value: str | None = None) -> str:

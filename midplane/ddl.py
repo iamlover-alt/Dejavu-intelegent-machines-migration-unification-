@@ -38,6 +38,37 @@ create table if not exists episodes (
   latency_ms     integer not null,
   outcome        text not null check (outcome in ('success', 'error')),
   quality_score  real not null,
-  trace          text not null
+  trace          text not null,
+  score_version  text not null default 'stub-v0',
+  created_at     text not null default ''
 );
+"""
+
+# RECONCILE with episode_schema.sql.
+# score_version and created_at are guesses. 002_gateway.sql already exists,
+# so these indexes live in migrations/003_episode_indexes.sql.
+POSTGRES_EPISODE_INDEX_DDL = """
+alter table episodes add column if not exists score_version text not null default 'stub-v0';
+
+alter table episodes add column if not exists created_at text not null default '';
+
+create index if not exists episodes_source_quality_score_idx
+  on episodes (source, quality_score);
+
+create index if not exists episodes_source_created_at_idx
+  on episodes (source, created_at);
+
+create index if not exists episodes_created_at_run_id_idx
+  on episodes (created_at, run_id);
+""".strip() + "\n"
+
+SQLITE_EPISODE_INDEX_DDL = """
+create index if not exists episodes_source_quality_score_idx
+  on episodes (source, quality_score);
+
+create index if not exists episodes_source_created_at_idx
+  on episodes (source, created_at);
+
+create index if not exists episodes_created_at_run_id_idx
+  on episodes (created_at, run_id);
 """

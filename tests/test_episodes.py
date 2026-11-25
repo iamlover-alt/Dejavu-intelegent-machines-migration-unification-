@@ -57,8 +57,11 @@ def test_postgres_migration_matches_packaged_ddl():
     text = Path("migrations/001_episodes.sql").read_text()
     assert "RECONCILE with episode_schema.sql" in text
     assert POSTGRES_EPISODES_DDL.strip() in text
-    for column in EPISODE_COLUMNS:
+    original = [column for column in EPISODE_COLUMNS if column not in {"score_version", "created_at"}]
+    for column in original:
         assert column in text
         assert column in SQLITE_EPISODES_DDL
+    assert "score_version" in SQLITE_EPISODES_DDL
+    assert "created_at" in SQLITE_EPISODES_DDL
     assert "jsonb" in POSTGRES_EPISODES_DDL
     assert "broker" not in text.lower()

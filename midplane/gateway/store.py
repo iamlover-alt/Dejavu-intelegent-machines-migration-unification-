@@ -182,6 +182,16 @@ class GatewayStore:
             return None
         return self._run_from_row(row)
 
+    def episode_ids_for_client(self, client_id: str) -> list[str]:
+        with self._lock:
+            rows = self._execute(
+                "select episode_id from runs where client_id = ? and episode_id is not null",
+                (client_id,),
+            ).fetchall()
+        if self.dialect == "sqlite":
+            return [row["episode_id"] for row in rows]
+        return [row[0] for row in rows]
+
     def find_run_for_episode(self, episode_id: str, client_id: str) -> RunRecord | None:
         with self._lock:
             row = self._execute(

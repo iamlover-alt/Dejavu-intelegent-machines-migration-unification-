@@ -42,6 +42,12 @@ final class ContractDecodingTests: XCTestCase {
         """.data(using: .utf8)!
         let omitted = try JSONDecoder().decode(Components.Schemas.AgentPage.self, from: pageWithoutCursor)
         XCTAssertNil(omitted.nextCursor)
+
+        let episodes = """
+        {"data":[],"limit":50,"next_cursor":null}
+        """.data(using: .utf8)!
+        let episodePage = try JSONDecoder().decode(Components.Schemas.EpisodePage.self, from: episodes)
+        XCTAssertNil(episodePage.nextCursor)
     }
 
     func testErrorEnvelopeDecodesWithAndWithoutDetails() throws {
