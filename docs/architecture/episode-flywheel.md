@@ -1,6 +1,6 @@
 # Episode data flywheel v0
 
-Every graph run already writes one episode. This slice makes that table usable as training data: a Postgres store, a replaceable quality score, an export command, and a list API.
+Every graph run already writes one episode. The implementation is [in review](https://github.com/iamlover-alt/Dejavu-intelegent-machines-migration-unification-/pull/7). This slice makes that table usable as training data: a Postgres store, a replaceable quality score, an export command, and a list API.
 
 The [first slice](first-slice.md) still owns the graph. The [gateway](../api/gateway-v0.md) is what an iOS client calls. This document owns scoring, listing, and the JSONL export.
 

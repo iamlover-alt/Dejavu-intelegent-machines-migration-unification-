@@ -14,9 +14,9 @@ Owners allowed in this tracker:
 | Skeptic Lab (trading research, paper only) | Trading research. Paper mode only. Real money stays behind the external trading control service |
 | Neutral Ops (general engineering) | General engineering: graph implementation, schema migration, observability plumbing |
 
-Status for every seeded row is `placeholder`, except **Ship the first vertical slice**, which is `in review` while [pull request #2](https://github.com/iamlover-alt/Dejavu-intelegent-machines-migration-unification-/pull/2) is open, and **Expose Gateway API v0**, which is `in review` while [pull request #3](https://github.com/iamlover-alt/Dejavu-intelegent-machines-migration-unification-/pull/3) is open. Those rows' wording is still a placeholder relative to `dejavu_90day_plan.xlsx`.
+Status for every seeded row is `placeholder`, except these rows, which are `in review`: **Ship the first vertical slice** ([pull request #2](https://github.com/iamlover-alt/Dejavu-intelegent-machines-migration-unification-/pull/2)), **Expose Gateway API v0** ([pull request #3](https://github.com/iamlover-alt/Dejavu-intelegent-machines-migration-unification-/pull/3)), and **Episode data flywheel v0** ([pull request #7](https://github.com/iamlover-alt/Dejavu-intelegent-machines-migration-unification-/pull/7)). Those rows' wording is still a placeholder relative to `dejavu_90day_plan.xlsx`.
 
-Context for the placeholders: [mid-plane architecture](../architecture/mid-plane.md), [first vertical slice](../architecture/first-slice.md), [Gateway API v0](../api/gateway-v0.md), [README](../../README.md).
+Context for the placeholders: [mid-plane architecture](../architecture/mid-plane.md), [first vertical slice](../architecture/first-slice.md), [episode flywheel](../architecture/episode-flywheel.md), [Gateway API v0](../api/gateway-v0.md), [README](../../README.md).
 
 | Milestone | Definition of done | Owner | Status | Evidence link |
 | --- | --- | --- | --- | --- |
@@ -28,6 +28,7 @@ Context for the placeholders: [mid-plane architecture](../architecture/mid-plane
 | PLACEHOLDER: Stand up traces, metrics, and per-run cost | Every run emits a trace, the measurements in the [observability section](../architecture/mid-plane.md#observability), and a per-run cost stored on the episode | Neutral Ops (general engineering) | placeholder | [observability](../architecture/mid-plane.md#observability) |
 | PLACEHOLDER: Expose Gateway API v0 | An iPhone app can build against the checked-in OpenAPI file: health, runs, SSE, episodes, and the agent roster, with bearer API keys. The [iOS checklist](../api/gateway-v0.md#ios-buildable-milestone) records what is done. | Platform Architect | in review | [pull request #3](https://github.com/iamlover-alt/Dejavu-intelegent-machines-migration-unification-/pull/3) |
 | PLACEHOLDER: Expose the iOS mid-plane surface | An iOS client can create a run with `source=app` and read the episode, using the contract in `integration_guide.md` once reconciled with the [iOS section](../architecture/mid-plane.md#ios-integration-surface) | Platform Architect | placeholder | [iOS integration surface](../architecture/mid-plane.md#ios-integration-surface) |
+| PLACEHOLDER: Episode data flywheel v0 | Episodes have a `score_version`, a heuristic score, export indexes, a JSONL export command, and `GET /v1/episodes` with source, min score, and cursor filters. Details are in the [flywheel doc](../architecture/episode-flywheel.md). | Platform Architect | in review | [pull request #7](https://github.com/iamlover-alt/Dejavu-intelegent-machines-migration-unification-/pull/7) |
 | PLACEHOLDER: Replace the stub score and export train/eval data | `quality_score` comes from the rubric in the [flywheel section](../architecture/mid-plane.md#episode-data-flywheel), and an export writes disjoint train and eval sets keyed by episode `run_id` | Platform Architect | placeholder | [episode data flywheel](../architecture/mid-plane.md#episode-data-flywheel) |
 
 ## Related documents
@@ -36,3 +37,4 @@ Context for the placeholders: [mid-plane architecture](../architecture/mid-plane
 - [Mid-plane architecture](../architecture/mid-plane.md)
 - [First vertical slice](../architecture/first-slice.md)
 - [Gateway API v0](../api/gateway-v0.md)
+- [Episode flywheel v0](../architecture/episode-flywheel.md)
