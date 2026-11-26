@@ -37,6 +37,11 @@ info:
     JWT from this gateway. Bearer API keys stay available for service clients.
 
 
+    `POST /v1/runs` accepts `task_type` `code_review` or `schema_agent`, or an `agent`
+    name (`schema-agent` or `schema_agent`). A code review requires `input.diff`.
+    A schema agent run requires `input.goal` (or a non-default `input.instructions`).
+
+
     This contract has no trading endpoints.'
   version: 0.1.0
 servers:
@@ -1287,9 +1292,20 @@ components:
     CreateRunRequest:
       properties:
         task_type:
-          type: string
-          const: code_review
           title: Task Type
+          description: 'Worker to run: code_review or schema_agent. Optional when
+            agent is set. JSON null is allowed.'
+          type:
+          - string
+          - 'null'
+        agent:
+          title: Agent
+          description: Agent name. schema-agent selects the schema agent. Optional
+            when task_type is set.
+          maxLength: 100
+          type:
+          - string
+          - 'null'
         input:
           $ref: '#/components/schemas/RunInput'
         client_ref:
@@ -1301,7 +1317,6 @@ components:
       additionalProperties: false
       type: object
       required:
-      - task_type
       - input
       title: CreateRunRequest
     CreateRunResponse:
@@ -1458,10 +1473,11 @@ components:
     RunInput:
       properties:
         diff:
-          type: string
-          minLength: 1
           title: Diff
-          description: Unified diff to review.
+          description: Unified diff to review. Required when the task is code_review.
+          type:
+          - string
+          - 'null'
         repo:
           type: string
           title: Repo
@@ -1470,10 +1486,23 @@ components:
           type: string
           title: Instructions
           default: Review this diff.
+        goal:
+          title: Goal
+          description: Schema, connector, or integration question. Required when the
+            task is schema_agent.
+          type:
+          - string
+          - 'null'
+        allow_side_effects:
+          type: boolean
+          title: Allow Side Effects
+          default: false
+        allow_writes:
+          type: boolean
+          title: Allow Writes
+          default: false
       additionalProperties: false
       type: object
-      required:
-      - diff
       title: RunInput
     RunStatusResponse:
       properties:

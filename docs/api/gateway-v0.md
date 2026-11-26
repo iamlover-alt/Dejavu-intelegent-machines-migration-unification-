@@ -1,6 +1,6 @@
 # Gateway API v0
 
-The first HTTP surface an iPhone app can build against. The implementation is [in review](https://github.com/iamlover-alt/Dejavu-intelegent-machines-migration-unification-/pull/3). It wraps the [first vertical slice](../architecture/first-slice.md): `supervisor` → `router` → `code_review` → `episode_writer`. Runs started here are ordinary graph runs with `source=app`.
+The first HTTP surface an iPhone app can build against. The implementation is [in review](https://github.com/iamlover-alt/Dejavu-intelegent-machines-migration-unification-/pull/3). It wraps the [first vertical slice](../architecture/first-slice.md): `supervisor` → `router` → `code_review` → `episode_writer`. A schema or connector question can take the [schema agent](../architecture/schema-agent.md) branch instead of `code_review`. Code-review runs started here use `source=app`. Schema-agent runs use `source=dev_guild`.
 
 The contract file is [openapi/midplane-v0.yaml](../../openapi/midplane-v0.yaml) (OpenAPI 3.1). The served schema is generated from the same FastAPI app. CI fails if the two differ. After an intentional change, regenerate and commit the file:
 
@@ -46,11 +46,11 @@ python -m midplane.gateway.keys revoke --key-id key_...
 | Method and path | Auth | Behavior |
 | --- | --- | --- |
 | `GET /healthz` | none | `{"status": "ok"}` |
-| `POST /v1/runs` | bearer | Body `{task_type, input, client_ref?}`. v0 accepts `task_type=code_review` and `input.diff`. Response `{run_id, status}` with status `queued`. |
+| `POST /v1/runs` | bearer | Body `{task_type?, agent?, input, client_ref?}`. `task_type` is `code_review` or `schema_agent`. `agent` may be `schema-agent` instead of `task_type`. A review requires `input.diff`. A schema run requires `input.goal`. Response `{run_id, status}` with status `queued`. |
 | `GET /v1/runs/{run_id}` | bearer | `queued`, `running`, `succeeded`, or `failed`, plus `result`, `episode_id`, and `error`. |
 | `GET /v1/runs/{run_id}/events` | bearer | `text/event-stream`. Frames are `run.started`, `node.started`, `node.completed`, `run.completed`, and `run.failed`. |
 | `GET /v1/episodes/{episode_id}` | bearer | The persisted episode, including `trace` and `quality_score`. |
-| `GET /v1/agents` | bearer | Static roster: name, title, status. |
+| `GET /v1/agents` | bearer | Static roster: name, title, status. Includes `schema-agent`. |
 
 A key is scoped to its client id. `ios-dev` cannot read a run created by another client. The response is `404`, so the other client's ids are not confirmed.
 
@@ -147,7 +147,7 @@ Auth v1 is not implemented. The planned path is:
 | `GET /healthz` without auth | done |
 | Create a run, read its status, read the episode | done |
 | SSE stream of node progress (`supervisor`, `router`, `code_review`, `episode_writer`) | done |
-| Agent roster with the ten named agents | done |
+| Agent roster with the named agents, including `schema-agent` | done |
 | Bearer API keys, hashed at rest, mint and revoke CLI, scoped per client | done |
 | One error shape, request ids, pagination on list responses | done |
 | Rate limit on authenticated calls (single process) | done |

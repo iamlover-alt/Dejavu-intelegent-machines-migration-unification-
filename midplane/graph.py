@@ -1,4 +1,4 @@
-"""LangGraph path: supervisor -> router -> code_review -> episode_writer.
+"""LangGraph path: supervisor -> router -> code_review | schema_agent -> episode_writer.
 
 RECONCILE with langgraph_nodes_pseudocode.py if node behavior differs.
 Checkpoints use LangGraph's in-memory saver so this slice runs without a
@@ -18,8 +18,15 @@ from typing import Mapping
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
+from midplane.agents.schema_agent import AGENT_NAME, build_schema_result
+from midplane.connectors import ConnectorConstraints
 from midplane.models import ModelError, ModelProvider, provider_from_env
-from midplane.prompts import CODE_REVIEW_PROMPT_REF, render_code_review_prompt
+from midplane.prompts import (
+    CODE_REVIEW_PROMPT_REF,
+    render_code_review_prompt,
+    render_schema_agent_prompt,
+    schema_prompt_version,
+)
 from midplane.routing import (
     CostLatencyRoutingPolicy,
     RoutingPolicy,
@@ -33,6 +40,28 @@ from midplane.store import Episode, EpisodeStore, episode_timestamp, open_store
 
 _BANNED_TOOL_TOKENS = ("broker", "trading", "exchange", "alpaca", "binance", "ccxt", "oanda")
 _SEVERITIES = {"info", "warn", "block"}
+_SCHEMA_QUESTION = ("schema", "connector", "integration")
+
+
+def resolve_worker(task: Mapping) -> str | None:
+    """Pick code_review or schema_agent. Unknown roles stay unrouted.
+
+    An explicit code_review role stays on code_review even when the diff
+    mentions a schema. Questions with role auto, question, or empty route to
+    the schema agent when they ask about schemas, connectors, or integrations.
+    """
+
+    role = str(task.get("role") or "").strip().lower().replace("-", "_")
+    if role in {"code_review", "review"}:
+        return "code_review"
+    if role in {"schema_agent", "schema"}:
+        return "schema_agent"
+    if role not in {"", "auto", "question"}:
+        return None
+    text = " ".join(str(task.get(key) or "") for key in ("goal", "instructions", "question")).lower()
+    if any(token in text for token in _SCHEMA_QUESTION):
+        return "schema_agent"
+    return None
 
 
 def tool_allowlist() -> tuple[str, ...]:
@@ -132,6 +161,9 @@ def route_or_write(state: MidPlaneState) -> str:
 def review_or_write(state: MidPlaneState) -> str:
     if state.get("error"):
         return "episode_writer"
+    steps = (state.get("plan") or {}).get("steps") or []
+    if steps and steps[0] == "schema_agent":
+        return "schema_agent"
     return "code_review"
 
 
@@ -193,6 +225,37 @@ def _call_model(provider: ModelProvider, model_id: str, prompt: str, role: str) 
     )
 
 
+def _complete_text(provider: ModelProvider, model_id: str, prompt: str, role: str) -> dict:
+    """One completion. Any text is success. Provider failures are errors."""
+
+    prompt_tokens = max(1, len(prompt) // 4)
+    try:
+        response = provider.complete(model_id=model_id, prompt=prompt)
+    except (ModelError, TimeoutError) as exc:
+        return {
+            "kind": "attempt",
+            "model_id": model_id,
+            "role": role,
+            "status": "error",
+            "error": str(exc),
+            "input_tokens": prompt_tokens,
+            "output_tokens": 0,
+            "cost_usd": 0.0,
+            "ok": False,
+        }
+    return {
+        "kind": "attempt",
+        "model_id": model_id,
+        "role": role,
+        "status": "success",
+        "error": None,
+        "input_tokens": response.input_tokens,
+        "output_tokens": response.output_tokens,
+        "cost_usd": response.cost_usd,
+        "ok": True,
+    }
+
+
 def build_graph(deps: GraphDeps, checkpointer=None):
     validate_tool_allowlist(deps.tools)
 
@@ -201,15 +264,23 @@ def build_graph(deps: GraphDeps, checkpointer=None):
         task = state.get("task") or {}
         role = task.get("role")
         source = state.get("source")
+        worker = resolve_worker(task)
         update: dict = {}
         if source not in {"dev_guild", "trading", "app"}:
             update["error"] = f"unsupported source: {source}"
             update["outcome"] = "error"
-        elif role != "code_review":
+        elif worker is None:
             update["error"] = f"unsupported role: {role}"
             update["outcome"] = "error"
-        else:
+        elif worker == "code_review":
             update["plan"] = {"steps": ["code_review"], "prompt_ref": CODE_REVIEW_PROMPT_REF}
+        else:
+            update["plan"] = {
+                "steps": ["schema_agent"],
+                "prompt_ref": "schema_agent",
+                "prompt_version": schema_prompt_version(),
+                "agent": AGENT_NAME,
+            }
         update.update(_timing("supervisor", started, state))
         return update
 
@@ -304,6 +375,81 @@ def build_graph(deps: GraphDeps, checkpointer=None):
         )
         return update
 
+    def schema_agent(state: MidPlaneState) -> dict:
+        started = time.perf_counter()
+        task = state.get("task") or {}
+        route = state.get("route") or {}
+        goal = str(task.get("goal") or task.get("instructions") or "").strip()
+        constraints = ConnectorConstraints.from_mapping(task.get("constraints"))
+        attempts: list[dict] = []
+        cost = _empty_cost()
+        if not goal:
+            update = {
+                "error": "schema_agent requires a goal",
+                "outcome": "error",
+                "output": {},
+                "cost": cost,
+                "tool_calls": [],
+            }
+            update.update(_timing("schema_agent", started, state, model_attempts=attempts, cost=cost))
+            return update
+        prompt = render_schema_agent_prompt(goal=goal, constraints=constraints.to_dict())
+        primary = route.get("primary")
+        fallback = route.get("fallback")
+        if not primary:
+            update = {
+                "error": "router did not select a model",
+                "outcome": "error",
+                "output": {},
+                "cost": cost,
+                "tool_calls": [],
+            }
+            update.update(_timing("schema_agent", started, state, model_attempts=attempts, cost=cost))
+            return update
+
+        def _absorb(model_id: str, role: str) -> bool:
+            nonlocal cost
+            attempt = _complete_text(deps.provider, model_id, prompt, role)
+            ok = bool(attempt.pop("ok"))
+            attempts.append(attempt)
+            cost = _add_usage(
+                cost,
+                model_id,
+                attempt["input_tokens"],
+                attempt["output_tokens"],
+                attempt["cost_usd"],
+            )
+            return ok
+
+        ok = _absorb(primary, "primary")
+        if not ok and fallback and fallback != primary:
+            ok = _absorb(fallback, "fallback")
+        update = {"model_choices": attempts, "cost": cost}
+        if not ok:
+            update["error"] = "schema_agent failed on the routed models"
+            update["outcome"] = "error"
+            update["output"] = {}
+            update["tool_calls"] = []
+        else:
+            result, tool_calls = build_schema_result(goal, constraints)
+            update["outcome"] = "success"
+            update["output"] = result.to_dict()
+            update["tool_calls"] = tool_calls
+        update.update(
+            _timing(
+                "schema_agent",
+                started,
+                state,
+                model_attempts=attempts,
+                tokens={
+                    "input_tokens": cost["input_tokens"],
+                    "output_tokens": cost["output_tokens"],
+                },
+                cost=cost,
+            )
+        )
+        return update
+
     def episode_writer(state: MidPlaneState) -> dict:
         started = time.perf_counter()
         error = state.get("error")
@@ -384,11 +530,13 @@ def build_graph(deps: GraphDeps, checkpointer=None):
     graph.add_node("supervisor", supervisor)
     graph.add_node("router", router)
     graph.add_node("code_review", code_review)
+    graph.add_node("schema_agent", schema_agent)
     graph.add_node("episode_writer", episode_writer)
     graph.add_edge(START, "supervisor")
     graph.add_conditional_edges("supervisor", route_or_write, ["router", "episode_writer"])
-    graph.add_conditional_edges("router", review_or_write, ["code_review", "episode_writer"])
+    graph.add_conditional_edges("router", review_or_write, ["code_review", "schema_agent", "episode_writer"])
     graph.add_conditional_edges("code_review", write_episode, ["episode_writer"])
+    graph.add_conditional_edges("schema_agent", write_episode, ["episode_writer"])
     graph.add_edge("episode_writer", END)
     return graph.compile(checkpointer=checkpointer if checkpointer is not None else MemorySaver())
 

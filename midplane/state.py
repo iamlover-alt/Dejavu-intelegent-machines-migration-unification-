@@ -64,3 +64,97 @@ def initial_state(
         "trace": [],
         "error": None,
     }
+
+
+class SupervisorReads(TypedDict):
+    source: str
+    task: dict
+
+
+class SupervisorWrites(TypedDict):
+    plan: dict
+    trace: list
+    latency_ms: int
+    error: str | None
+    outcome: str | None
+
+
+class RouterReads(TypedDict):
+    plan: dict
+
+
+class RouterWrites(TypedDict):
+    route: dict
+    model_choices: list
+    trace: list
+    latency_ms: int
+    error: str | None
+    outcome: str | None
+
+
+class CodeReviewReads(TypedDict):
+    task: dict
+    route: dict
+
+
+class CodeReviewWrites(TypedDict):
+    output: dict
+    model_choices: list
+    tool_calls: list
+    cost: dict
+    latency_ms: int
+    trace: list
+    outcome: str | None
+    error: str | None
+
+
+class SchemaAgentReads(TypedDict):
+    task: dict
+    route: dict
+
+
+class SchemaAgentWrites(TypedDict):
+    output: dict
+    model_choices: list
+    tool_calls: list
+    cost: dict
+    latency_ms: int
+    trace: list
+    outcome: str | None
+    error: str | None
+
+
+class EpisodeWriterReads(TypedDict):
+    run_id: str
+    source: str
+    task: dict
+    plan: dict
+    model_choices: list
+    tool_calls: list
+    output: dict
+    cost: dict
+    latency_ms: int
+    outcome: str | None
+    trace: list
+    error: str | None
+    created_at: str | None
+
+
+class EpisodeWriterWrites(TypedDict):
+    trace: list
+    latency_ms: int
+    outcome: str | None
+    output: dict
+    cost: dict
+    quality_score: float | None
+    score_version: str | None
+    created_at: str | None
+
+
+NODE_CONTRACTS: dict[str, dict[str, type]] = {
+    "supervisor": {"reads": SupervisorReads, "writes": SupervisorWrites},
+    "router": {"reads": RouterReads, "writes": RouterWrites},
+    "code_review": {"reads": CodeReviewReads, "writes": CodeReviewWrites},
+    "schema_agent": {"reads": SchemaAgentReads, "writes": SchemaAgentWrites},
+    "episode_writer": {"reads": EpisodeWriterReads, "writes": EpisodeWriterWrites},
+}

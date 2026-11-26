@@ -25,6 +25,8 @@ REQUIRED_FIELDS = (
 )
 
 HAPPY_PATH_NODES = {"supervisor", "router", "code_review", "episode_writer"}
+_HEURISTIC_CORE = {"supervisor", "router", "episode_writer"}
+_HEURISTIC_WORKERS = {"code_review", "schema_agent"}
 
 
 def stub_quality_score(state: Mapping) -> float:
@@ -60,8 +62,9 @@ class StubQualityScorer:
 class HeuristicQualityScorer:
     """Four checks, summed, and capped below 1.0.
 
-    * 0.40 the run completed: outcome success, no error, and the four slice nodes are in the trace
-    * 0.30 the review produced at least one finding
+    * 0.40 the run completed: outcome success, no error, and the trace has
+      supervisor, router, episode_writer, plus code_review or schema_agent
+    * 0.30 the review produced at least one finding, or the schema agent returned strategies
     * 0.15 latency_ms is within max_latency_ms
     * 0.15 cost.total_usd is within max_cost_usd
     """
@@ -78,13 +81,21 @@ class HeuristicQualityScorer:
         completed = (
             state.get("outcome") == "success"
             and state.get("error") is None
-            and HAPPY_PATH_NODES <= traced
+            and _HEURISTIC_CORE <= traced
+            and bool(_HEURISTIC_WORKERS & traced)
         )
         if completed:
             points += 0.40
         output = state.get("output") or {}
         findings = output.get("findings") if isinstance(output, dict) else None
-        if isinstance(findings, list) and any(isinstance(item, dict) and item.get("detail") for item in findings):
+        strategies = output.get("strategies") if isinstance(output, dict) else None
+        has_findings = isinstance(findings, list) and any(
+            isinstance(item, dict) and item.get("detail") for item in findings
+        )
+        has_strategies = isinstance(strategies, list) and any(
+            isinstance(item, dict) and item.get("steps") for item in strategies
+        )
+        if has_findings or has_strategies:
             points += 0.30
         latency = state.get("latency_ms")
         if isinstance(latency, (int, float)) and not isinstance(latency, bool) and latency <= self.max_latency_ms:
