@@ -1,7 +1,9 @@
-"""LangGraph path: supervisor -> router -> code_review -> episode_writer.
+"""LangGraph path: supervisor -> router -> code_review | schema_agent -> episode_writer.
 
 ``MIDPLANE_RETRIEVAL=1`` inserts ``retrieve_context`` between the router and
-code_review. The default is off, so the slice edges stay as written here.
+code_review, and makes ``schema_agent`` pull schema and connector documents
+before it answers. The default is off, so those edges and that prompt stay
+as written here.
 
 RECONCILE with langgraph_nodes_pseudocode.py if node behavior differs.
 Checkpoints use LangGraph's in-memory saver so this slice runs without a
@@ -22,8 +24,15 @@ from typing import Mapping
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
+from midplane.agents.schema_agent import AGENT_NAME, build_schema_result
+from midplane.connectors import ConnectorConstraints
 from midplane.models import ModelError, ModelProvider, provider_from_env
-from midplane.prompts import CODE_REVIEW_PROMPT_REF, render_code_review_prompt
+from midplane.prompts import (
+    CODE_REVIEW_PROMPT_REF,
+    render_code_review_prompt,
+    render_schema_agent_prompt,
+    schema_prompt_version,
+)
 from midplane.retrieval.chain import (
     DEFAULT_RETRIEVAL_STEPS,
     ChainStep,
@@ -32,6 +41,13 @@ from midplane.retrieval.chain import (
     retrieval_prefix,
 )
 from midplane.retrieval.episodes import EpisodeMemoryStore
+from midplane.retrieval.schema_store import (
+    SCHEMA_AGENT_TOP_K,
+    SchemaConnectorStore,
+    SchemaDocumentLoader,
+    registry_context_prefix,
+    retrieve_schema_and_connector_docs,
+)
 from midplane.retrieval.traces import DecisionTraceStore
 from midplane.routing import (
     CostLatencyRoutingPolicy,
@@ -46,6 +62,28 @@ from midplane.store import Episode, EpisodeStore, episode_timestamp, open_store
 
 _BANNED_TOOL_TOKENS = ("broker", "trading", "exchange", "alpaca", "binance", "ccxt", "oanda")
 _SEVERITIES = {"info", "warn", "block"}
+_SCHEMA_QUESTION = ("schema", "connector", "integration")
+
+
+def resolve_worker(task: Mapping) -> str | None:
+    """Pick code_review or schema_agent. Unknown roles stay unrouted.
+
+    An explicit code_review role stays on code_review even when the diff
+    mentions a schema. Questions with role auto, question, or empty route to
+    the schema agent when they ask about schemas, connectors, or integrations.
+    """
+
+    role = str(task.get("role") or "").strip().lower().replace("-", "_")
+    if role in {"code_review", "review"}:
+        return "code_review"
+    if role in {"schema_agent", "schema"}:
+        return "schema_agent"
+    if role not in {"", "auto", "question"}:
+        return None
+    text = " ".join(str(task.get(key) or "") for key in ("goal", "instructions", "question")).lower()
+    if any(token in text for token in _SCHEMA_QUESTION):
+        return "schema_agent"
+    return None
 
 
 def tool_allowlist() -> tuple[str, ...]:
@@ -145,6 +183,9 @@ def route_or_write(state: MidPlaneState) -> str:
 def review_or_write(state: MidPlaneState) -> str:
     if state.get("error"):
         return "episode_writer"
+    steps = (state.get("plan") or {}).get("steps") or []
+    if steps and steps[0] == "schema_agent":
+        return "schema_agent"
     return "code_review"
 
 
@@ -153,10 +194,34 @@ def write_episode(state: MidPlaneState) -> str:
 
 
 def retrieval_enabled_from_env(env: Mapping[str, str] | None = None) -> bool:
-    """The graph calls retrieve_context only when this is on. Default is off."""
+    """Retrieval stays off unless this is on.
+
+    When it is on, code review runs ``retrieve_context`` and the schema agent
+    loads registry documents before it answers. The default is off.
+    """
 
     source = os.environ if env is None else env
     return source.get("MIDPLANE_RETRIEVAL", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _registry_schema_store(deps: GraphDeps) -> SchemaConnectorStore:
+    """Schema and connector documents from the registries.
+
+    The index stays in memory so it does not share the pgvector rows the
+    built-in HTTP loader writes under the same store name.
+    """
+
+    if deps.schema_documents is None:
+        from midplane.retrieval.embedder import HashedNgramEmbedder
+        from midplane.retrieval.index import InMemoryVectorIndex
+
+        embedder = HashedNgramEmbedder()
+        deps.schema_documents = SchemaConnectorStore(
+            loader=SchemaDocumentLoader(),
+            embedder=embedder,
+            index=InMemoryVectorIndex(embedder.dimension),
+        )
+    return deps.schema_documents
 
 
 def _store_url(store: EpisodeStore) -> str | None:
@@ -185,6 +250,8 @@ class GraphDeps:
     decision_traces: DecisionTraceStore | None = None
     retrieval_chain: RetrievalChain | None = None
     retrieval_steps: tuple[ChainStep, ...] = ()
+    schema_documents: SchemaConnectorStore | None = None
+    schema_retrieval_top_k: int = SCHEMA_AGENT_TOP_K
 
 
 @dataclass
@@ -230,6 +297,37 @@ def _call_model(provider: ModelProvider, model_id: str, prompt: str, role: str) 
     )
 
 
+def _complete_text(provider: ModelProvider, model_id: str, prompt: str, role: str) -> dict:
+    """One completion. Any text is success. Provider failures are errors."""
+
+    prompt_tokens = max(1, len(prompt) // 4)
+    try:
+        response = provider.complete(model_id=model_id, prompt=prompt)
+    except (ModelError, TimeoutError) as exc:
+        return {
+            "kind": "attempt",
+            "model_id": model_id,
+            "role": role,
+            "status": "error",
+            "error": str(exc),
+            "input_tokens": prompt_tokens,
+            "output_tokens": 0,
+            "cost_usd": 0.0,
+            "ok": False,
+        }
+    return {
+        "kind": "attempt",
+        "model_id": model_id,
+        "role": role,
+        "status": "success",
+        "error": None,
+        "input_tokens": response.input_tokens,
+        "output_tokens": response.output_tokens,
+        "cost_usd": response.cost_usd,
+        "ok": True,
+    }
+
+
 def build_graph(deps: GraphDeps, checkpointer=None):
     validate_tool_allowlist(deps.tools)
 
@@ -238,15 +336,23 @@ def build_graph(deps: GraphDeps, checkpointer=None):
         task = state.get("task") or {}
         role = task.get("role")
         source = state.get("source")
+        worker = resolve_worker(task)
         update: dict = {}
         if source not in {"dev_guild", "trading", "app"}:
             update["error"] = f"unsupported source: {source}"
             update["outcome"] = "error"
-        elif role != "code_review":
+        elif worker is None:
             update["error"] = f"unsupported role: {role}"
             update["outcome"] = "error"
-        else:
+        elif worker == "code_review":
             update["plan"] = {"steps": ["code_review"], "prompt_ref": CODE_REVIEW_PROMPT_REF}
+        else:
+            update["plan"] = {
+                "steps": ["schema_agent"],
+                "prompt_ref": "schema_agent",
+                "prompt_version": schema_prompt_version(),
+                "agent": AGENT_NAME,
+            }
         update.update(_timing("supervisor", started, state))
         return update
 
@@ -360,6 +466,122 @@ def build_graph(deps: GraphDeps, checkpointer=None):
             )
         )
         return update
+
+    def schema_agent(state: MidPlaneState) -> dict:
+        started = time.perf_counter()
+        task = state.get("task") or {}
+        route = state.get("route") or {}
+        goal = str(task.get("goal") or task.get("instructions") or "").strip()
+        constraints = ConnectorConstraints.from_mapping(task.get("constraints"))
+        attempts: list[dict] = []
+        cost = _empty_cost()
+        retrieved_ids: list[str] | None = None
+        retrieval_update: dict = {}
+        if not goal:
+            update = {
+                "error": "schema_agent requires a goal",
+                "outcome": "error",
+                "output": {},
+                "cost": cost,
+                "tool_calls": [],
+            }
+            update.update(_timing("schema_agent", started, state, model_attempts=attempts, cost=cost))
+            return update
+        prompt = render_schema_agent_prompt(goal=goal, constraints=constraints.to_dict())
+        if deps.retrieval_enabled:
+            hits = retrieve_schema_and_connector_docs(
+                _registry_schema_store(deps),
+                goal,
+                top_k=deps.schema_retrieval_top_k,
+            )
+            retrieved_ids = [hit.doc_id for hit in hits]
+            retrieval_update = {
+                "retrieval": {
+                    "doc_ids": list(retrieved_ids),
+                    "hits": [
+                        {
+                            "doc_id": hit.doc_id,
+                            "store": hit.store,
+                            "kind": hit.metadata.get("kind"),
+                            "score": hit.score,
+                            "text": hit.text[:300],
+                        }
+                        for hit in hits
+                    ],
+                }
+            }
+            prompt = registry_context_prefix(hits) + prompt
+            if deps.decision_traces is not None:
+                deps.decision_traces.record(
+                    agent="schema_agent",
+                    run_id=str(state.get("run_id") or ""),
+                    episode_id=str(state.get("run_id") or ""),
+                    decision_point="schema_retrieval",
+                    options=retrieved_ids,
+                    choice=retrieved_ids[0] if retrieved_ids else "",
+                    rationale=(
+                        "retrieved schema and connector documents before answering: "
+                        + ", ".join(retrieved_ids)
+                    ),
+                    outcome="unknown",
+                )
+        primary = route.get("primary")
+        fallback = route.get("fallback")
+
+        def _finish(update: dict) -> dict:
+            if retrieved_ids is not None:
+                update.update(retrieval_update)
+            timing_fields: dict = {"model_attempts": attempts, "cost": cost}
+            if attempts:
+                timing_fields["tokens"] = {
+                    "input_tokens": cost["input_tokens"],
+                    "output_tokens": cost["output_tokens"],
+                }
+            if retrieved_ids is not None:
+                timing_fields["retrieved_doc_ids"] = list(retrieved_ids)
+            update.update(_timing("schema_agent", started, state, **timing_fields))
+            return update
+
+        if not primary:
+            return _finish(
+                {
+                    "error": "router did not select a model",
+                    "outcome": "error",
+                    "output": {},
+                    "cost": cost,
+                    "tool_calls": [],
+                }
+            )
+
+        def _absorb(model_id: str, role: str) -> bool:
+            nonlocal cost
+            attempt = _complete_text(deps.provider, model_id, prompt, role)
+            ok = bool(attempt.pop("ok"))
+            attempts.append(attempt)
+            cost = _add_usage(
+                cost,
+                model_id,
+                attempt["input_tokens"],
+                attempt["output_tokens"],
+                attempt["cost_usd"],
+            )
+            return ok
+
+        ok = _absorb(primary, "primary")
+        if not ok and fallback and fallback != primary:
+            ok = _absorb(fallback, "fallback")
+        update = {"model_choices": attempts, "cost": cost}
+        if not ok:
+            update["error"] = "schema_agent failed on the routed models"
+            update["outcome"] = "error"
+            update["output"] = {}
+            update["tool_calls"] = []
+        else:
+            result, tool_calls = build_schema_result(goal, constraints)
+            update["outcome"] = "success"
+            update["output"] = result.to_dict()
+            update["tool_calls"] = tool_calls
+        return _finish(update)
 
     def episode_writer(state: MidPlaneState) -> dict:
         started = time.perf_counter()
@@ -480,22 +702,35 @@ def build_graph(deps: GraphDeps, checkpointer=None):
     def review_or_retrieve(state: MidPlaneState) -> str:
         if state.get("error"):
             return "episode_writer"
+        steps = (state.get("plan") or {}).get("steps") or []
+        if steps and steps[0] == "schema_agent":
+            return "schema_agent"
         return "retrieve_context"
 
     graph = StateGraph(MidPlaneState)
     graph.add_node("supervisor", supervisor)
     graph.add_node("router", router)
     graph.add_node("code_review", code_review)
+    graph.add_node("schema_agent", schema_agent)
     graph.add_node("episode_writer", episode_writer)
     graph.add_edge(START, "supervisor")
     graph.add_conditional_edges("supervisor", route_or_write, ["router", "episode_writer"])
     if deps.retrieval_enabled:
         graph.add_node("retrieve_context", retrieve_context)
-        graph.add_conditional_edges("router", review_or_retrieve, ["retrieve_context", "episode_writer"])
+        graph.add_conditional_edges(
+            "router",
+            review_or_retrieve,
+            ["retrieve_context", "schema_agent", "episode_writer"],
+        )
         graph.add_edge("retrieve_context", "code_review")
     else:
-        graph.add_conditional_edges("router", review_or_write, ["code_review", "episode_writer"])
+        graph.add_conditional_edges(
+            "router",
+            review_or_write,
+            ["code_review", "schema_agent", "episode_writer"],
+        )
     graph.add_conditional_edges("code_review", write_episode, ["episode_writer"])
+    graph.add_conditional_edges("schema_agent", write_episode, ["episode_writer"])
     graph.add_edge("episode_writer", END)
     return graph.compile(checkpointer=checkpointer if checkpointer is not None else MemorySaver())
 
@@ -522,6 +757,8 @@ def _start_run(
     decision_traces: DecisionTraceStore | None,
     retrieval_chain: RetrievalChain | None,
     retrieval_steps: tuple[ChainStep, ...] | None,
+    schema_documents: SchemaConnectorStore | None,
+    schema_retrieval_top_k: int | None,
 ):
     resolved_run_id = run_id or str(uuid.uuid4())
     resolved_thread_id = thread_id or resolved_run_id
@@ -540,8 +777,6 @@ def _start_run(
         trace_url = url if url and not url.endswith(":memory:") else "sqlite:///:memory:"
         traces = DecisionTraceStore(trace_url)
     if enabled and chain is None:
-        from midplane.retrieval.schema_store import SchemaConnectorStore
-
         schema = SchemaConnectorStore(database_url=_store_url(resolved_store))
         chain = RetrievalChain(
             stores={"episodes": memory, "schema": schema, "traces": traces},
@@ -563,6 +798,8 @@ def _start_run(
         decision_traces=traces,
         retrieval_chain=chain,
         retrieval_steps=steps,
+        schema_documents=schema_documents,
+        schema_retrieval_top_k=SCHEMA_AGENT_TOP_K if schema_retrieval_top_k is None else schema_retrieval_top_k,
     )
     graph = build_graph(deps, checkpointer=checkpointer)
     incoming = initial_state(
@@ -615,6 +852,8 @@ def run_review(
     decision_traces: DecisionTraceStore | None = None,
     retrieval_chain: RetrievalChain | None = None,
     retrieval_steps: tuple[ChainStep, ...] | None = None,
+    schema_documents: SchemaConnectorStore | None = None,
+    schema_retrieval_top_k: int | None = None,
 ) -> RunResult:
     deps, graph, incoming, config, resolved_run_id, resolved_thread_id = _start_run(
         diff,
@@ -637,6 +876,8 @@ def run_review(
         decision_traces=decision_traces,
         retrieval_chain=retrieval_chain,
         retrieval_steps=retrieval_steps,
+        schema_documents=schema_documents,
+        schema_retrieval_top_k=schema_retrieval_top_k,
     )
     final = graph.invoke(incoming, config=config)
     return _result_from_state(deps, graph, final, resolved_run_id, resolved_thread_id)
@@ -664,6 +905,8 @@ def stream_review(
     decision_traces: DecisionTraceStore | None = None,
     retrieval_chain: RetrievalChain | None = None,
     retrieval_steps: tuple[ChainStep, ...] | None = None,
+    schema_documents: SchemaConnectorStore | None = None,
+    schema_retrieval_top_k: int | None = None,
 ):
     """Yield one event per finished node, then a terminal event with the episode.
 
@@ -692,6 +935,8 @@ def stream_review(
         decision_traces=decision_traces,
         retrieval_chain=retrieval_chain,
         retrieval_steps=retrieval_steps,
+        schema_documents=schema_documents,
+        schema_retrieval_top_k=schema_retrieval_top_k,
     )
     for update in graph.stream(incoming, config=config, stream_mode="updates"):
         if not isinstance(update, dict):

@@ -71,7 +71,11 @@ The seed marks EpisodeStore, Gateway REST+SSE, the in-process LLM provider (fake
 
 ### Loader plug for the schema agent
 
-`SchemaDocumentLoader.load_documents()` is the seam. `SchemaConnectorStore(loader=...)` accepts another loader. `midplane/schema_registry/` and the schema agent are a separate change. This package does not import them. A later registry can pass its loader without this store hardcoding table or path lists beyond the built-in loader.
+`SchemaDocumentLoader.load_documents()` reads `midplane/schema_registry/` and `midplane/connectors/registry.yaml`. One document per catalog entry (`schema:<id>`) and one per connector (`connector:<name>`). Connector rows keep `real_money: false`. `trading_control` stays `paper_only` because its safety tier is `paper_only`. `SchemaConnectorStore(loader=SchemaDocumentLoader())` indexes that corpus with the local hashed embedder.
+
+`BuiltinSchemaLoader` remains the default. `POST /v1/retrieve` and the code-review chain still use the OpenAPI, migration, and `midplane/retrieval/connectors.yaml` seed, so those document ids stay stable.
+
+When `MIDPLANE_RETRIEVAL` is on, the `schema_agent` node calls `retrieve_schema_and_connector_docs` before the model call. It takes the top 5 schema documents and the top 5 connector documents, prepends them to the prompt, and records the doc ids on the schema-agent episode event (`retrieved_doc_ids`) and on a `schema_retrieval` decision trace. The flag default is off. With the flag off the prompt, the tools, and the episode match a run that does not retrieve, and the graph does not insert `retrieve_context` on the schema-agent path. Code review still uses `retrieve_context` only when the flag is on.
 
 ### Decision traces
 
@@ -137,7 +141,7 @@ score(doc) = sum over hops of  weight(store) / (60 + rank)
 | schema | 1.0 |
 | traces | 0.85 |
 
-`retrieve_context` sits between `router` and `code_review` only when the flag is on. It writes a short hit list onto state. `code_review` prepends that text to the prompt when the list is non-empty. With the flag off the prompt and the edges are unchanged.
+`retrieve_context` sits between `router` and `code_review` only when the flag is on. It writes a short hit list onto state. `code_review` prepends that text to the prompt when the list is non-empty. With the flag off the prompt and the edges are unchanged. A schema-agent run does not take that node. The schema agent retrieves inside its own node, and only from the registry loader, when the same flag is on.
 
 ## Cost
 
@@ -153,5 +157,6 @@ score(doc) = sum over hops of  weight(store) / (60 + rank)
 - [README](../../README.md)
 - [Mid-plane architecture](mid-plane.md)
 - [Episode flywheel v0](episode-flywheel.md)
+- [Schema agent](schema-agent.md)
 - [Gateway API v0](../api/gateway-v0.md)
 - [90-day tracker](../plan/90-day-tracker.md)

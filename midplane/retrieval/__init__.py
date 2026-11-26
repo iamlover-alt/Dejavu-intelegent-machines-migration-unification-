@@ -14,7 +14,12 @@ from midplane.retrieval.chain import (
 )
 from midplane.retrieval.embedder import EMBEDDING_DIM, HashedNgramEmbedder
 from midplane.retrieval.episodes import EpisodeMemoryStore
-from midplane.retrieval.schema_store import BuiltinSchemaLoader, SchemaConnectorStore, SchemaDocumentLoader
+from midplane.retrieval.schema_store import (
+    BuiltinSchemaLoader,
+    SchemaConnectorStore,
+    SchemaDocumentLoader,
+    SchemaDocumentSource,
+)
 from midplane.retrieval.traces import DecisionTraceStore
 from midplane.retrieval.types import Document, RetrievalResult, ScoreBreakdown
 
@@ -32,6 +37,7 @@ __all__ = [
     "RetrievalResult",
     "SchemaConnectorStore",
     "SchemaDocumentLoader",
+    "SchemaDocumentSource",
     "ScoreBreakdown",
     "retrieval_payload",
     "retrieval_prefix",

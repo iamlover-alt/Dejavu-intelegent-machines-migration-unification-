@@ -1,9 +1,10 @@
 """Schema and connector documents.
 
-``SchemaDocumentLoader`` is the plug a later schema agent can implement.
-``midplane/schema_registry/`` is a separate change and is not imported here.
-``BuiltinSchemaLoader`` reads the checked-in OpenAPI file, the SQL migrations,
-and ``connectors.yaml``.
+``SchemaDocumentLoader`` reads the schema registry and the connector registry
+and returns documents for ``SchemaConnectorStore``. ``BuiltinSchemaLoader``
+still seeds the HTTP store from the checked-in OpenAPI file, the SQL
+migrations, and ``midplane/retrieval/connectors.yaml``. The two loaders stay
+separate so the labelled recall fixtures keep their document ids.
 """
 
 from __future__ import annotations
@@ -30,15 +31,15 @@ _CREATE_TABLE = re.compile(
 _SKIP_COLUMN = ("constraint", "primary", "unique", "check", "foreign")
 
 
-class SchemaDocumentLoader(Protocol):
-    """Source of schema and connector documents.
-
-    A later ``midplane/schema_registry/`` loader can replace ``BuiltinSchemaLoader``.
-    This package does not import that registry.
-    """
+class SchemaDocumentSource(Protocol):
+    """Anything ``SchemaConnectorStore`` can index."""
 
     def load_documents(self) -> list[Document]:
         """Return the documents to index."""
+
+
+# Top-k for each kind when the schema agent retrieves before it answers.
+SCHEMA_AGENT_TOP_K = 5
 
 
 def repo_root() -> Path:
@@ -234,13 +235,111 @@ def load_connector_documents(path: Path) -> list[Document]:
     return documents
 
 
+class SchemaDocumentLoader:
+    """Load schema-registry entries and connector-registry rows as documents.
+
+    Imports of those packages happen inside ``load_documents`` so importing
+    the retrieval package does not build the catalogs. Every connector must
+    have ``real_money`` false. ``trading_control`` must stay paper-only.
+    """
+
+    def load_documents(self) -> list[Document]:
+        from midplane.connectors import load_connector_registry
+        from midplane.schema_registry import load_schema_registry
+
+        documents = [_schema_entry_document(entry) for entry in load_schema_registry().entries]
+        documents.extend(_connector_registry_document(item) for item in load_connector_registry())
+        ids = [document.doc_id for document in documents]
+        if len(ids) != len(set(ids)):
+            raise ValueError("schema and connector document ids are not unique")
+        return documents
+
+
+def _schema_entry_document(entry) -> Document:
+    field_names = " ".join(field.name for field in entry.fields)
+    text = (
+        f"schema {entry.id} domain {entry.domain} version {entry.version} "
+        f"{entry.description} fields {field_names}"
+    )
+    return Document(
+        doc_id=f"schema:{entry.id}",
+        store="schema",
+        text=" ".join(text.split()),
+        metadata={
+            "store": "schema",
+            "kind": "schema",
+            "name": entry.id,
+            "status": "wired",
+            "domain": entry.domain,
+            "source_file": entry.source_file,
+        },
+        fields={"name": entry.id, "kind": "schema", "domain": entry.domain},
+    )
+
+
+def _connector_registry_document(connector) -> Document:
+    if connector.real_money is not False:
+        raise ValueError(f"{connector.name} must set real_money: false")
+    paper_only = connector.safety_tier == "paper_only"
+    if connector.name == "trading_control" and paper_only is not True:
+        raise ValueError("trading_control must stay paper-only")
+    capabilities = " ".join(item.id for item in connector.capabilities)
+    examples = " ".join(connector.examples)
+    text = (
+        f"connector {connector.name} kind {connector.kind} status {connector.status} "
+        f"safety_tier {connector.safety_tier} paper_only {str(paper_only).lower()} "
+        f"real_money false capabilities {capabilities} {connector.notes} {examples}"
+    )
+    return Document(
+        doc_id=f"connector:{connector.name}",
+        store="schema",
+        text=" ".join(text.split()),
+        metadata={
+            "store": "schema",
+            "kind": "connector",
+            "name": connector.name,
+            "title": connector.name,
+            "status": connector.status,
+            "paper_only": paper_only,
+            "real_money": False,
+            "safety_tier": connector.safety_tier,
+            "source_file": "midplane/connectors/registry.yaml",
+        },
+        fields={
+            "name": connector.name,
+            "title": connector.name,
+            "kind": "connector",
+            "status": connector.status,
+        },
+    )
+
+
+def retrieve_schema_and_connector_docs(store, query: str, *, top_k: int = SCHEMA_AGENT_TOP_K) -> list[RetrievalResult]:
+    """Top-k schema documents, then top-k connector documents, for one query."""
+
+    if top_k < 1:
+        raise ValueError("top_k must be at least 1")
+    schemas = store.retrieve(query, top_k=top_k, filters={"kind": "schema"})
+    connectors = store.retrieve(query, top_k=top_k, filters={"kind": "connector"})
+    return [*schemas, *connectors]
+
+
+def registry_context_prefix(hits: list[RetrievalResult]) -> str:
+    """Text placed in front of the schema-agent prompt. Empty when nothing was retrieved."""
+
+    if not hits:
+        return ""
+    lines = [f"- {hit.doc_id}: {hit.text[:300]}" for hit in hits]
+    return "Retrieved schema and connector documents:\n" + "\n".join(lines) + "\n\n"
+
+
 class SchemaConnectorStore:
     """Indexes whatever ``loader`` returns. The default loader is the built-in seed."""
 
     def __init__(
         self,
         *,
-        loader: SchemaDocumentLoader | None = None,
+        loader: SchemaDocumentSource | None = None,
         embedder: Embedder | None = None,
         index: VectorIndex | None = None,
         database_url: str | None = None,

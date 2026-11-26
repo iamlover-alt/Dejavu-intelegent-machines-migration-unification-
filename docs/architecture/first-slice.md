@@ -26,7 +26,7 @@ Decisions in the code that the team artifacts may override:
 
 - The `episodes` columns match the illustrative DDL in this document. `migrations/001_episodes.sql` is the Postgres statement. Tests and the default CLI use SQLite, with JSON stored as text, because a disposable Postgres is not required to run the slice.
 - Checkpoints use LangGraph's in-memory saver, keyed by `thread_id`. The paragraph below still names a Postgres saver as the default when `langgraph_state_management.md` is silent. The in-memory saver is what this slice runs, so the CLI and CI do not need a database server. Switch the checkpointer if that document says otherwise; the episode table stays the same.
-- `midplane/prompts.py` is a stand-in for the `code_review` prompt. The structured findings are `summary`, `findings[]` (`severity`, `detail`, `ref`), and `confidence`.
+- `midplane/prompts/` is a stand-in for the guild prompts. `render_code_review_prompt` still returns `summary`, `findings[]` (`severity`, `detail`, `ref`), and `confidence`. The schema agent prompt is `midplane/prompts/schema_agent.md`.
 - Model cost on an episode is an estimate from token counts (`total_usd`), not a provider invoice.
 - The trading control client in `midplane/trading.py` refuses any mode other than `paper` and never calls a broker. It is not a graph tool.
 

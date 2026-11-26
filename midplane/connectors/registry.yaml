@@ -1,0 +1,280 @@
+# Declarative connector catalog for the schema agent.
+# status: wired means the repo already runs this path.
+# status: planned means the platform does not call it yet.
+# real_money stays false. Live trading needs hard external controls
+# that this catalog cannot grant.
+version: v0
+connectors:
+  - name: episode_store
+    kind: database
+    status: wired
+    capabilities:
+      - id: read
+        effect: read
+        description: Read one episode by run_id.
+      - id: list
+        effect: read
+        description: List episodes by source, score, and cursor.
+      - id: upsert
+        effect: write
+        description: Insert or replace the episode for a run_id.
+    auth:
+      required: false
+      schemes: [database_url]
+      notes: SQLite needs no secret. Postgres uses DATABASE_URL.
+    side_effects: [upsert]
+    schemas:
+      produces: [episode, export.jsonl]
+      consumes: [episode]
+    safety_tier: internal
+    real_money: false
+    examples:
+      - Persist a code_review episode
+      - Page episodes for the JSONL export
+    notes: SqliteEpisodeStore and PostgresEpisodeStore implement EpisodeStore.
+
+  - name: gateway
+    kind: http
+    status: wired
+    capabilities:
+      - id: read_health
+        effect: read
+        description: GET /healthz.
+      - id: read_run
+        effect: read
+        description: GET /v1/runs/{run_id}.
+      - id: read_episode
+        effect: read
+        description: GET /v1/episodes and GET /v1/episodes/{episode_id}.
+      - id: list_agents
+        effect: read
+        description: GET /v1/agents.
+      - id: stream_events
+        effect: read
+        description: Read the SSE log for one run.
+      - id: create_run
+        effect: write
+        description: POST /v1/runs.
+    auth:
+      required: true
+      schemes: [bearer]
+      notes: Bearer API key except GET /healthz. Auth v1 is not built.
+    side_effects: [create_run]
+    schemas:
+      produces:
+        - gateway.component.RunStatusResponse
+        - gateway.component.EpisodeResponse
+        - gateway.sse.run.completed
+      consumes:
+        - gateway.component.CreateRunRequest
+    safety_tier: internal
+    real_money: false
+    examples:
+      - Create a run and stream node events
+      - Read an episode the caller owns
+    notes: The contract file is openapi/midplane-v0.yaml. There is no trading path.
+
+  - name: github
+    kind: source_control
+    status: planned
+    capabilities:
+      - id: read_diff
+        effect: read
+        description: Read a pull request diff for code_review.
+    auth:
+      required: true
+      schemes: [token]
+      notes: No GitHub client is registered in this repo.
+    side_effects: []
+    schemas:
+      produces: []
+      consumes:
+        - midplane.node.code_review.reads
+    safety_tier: external_read
+    real_money: false
+    examples:
+      - Fetch the diff a code_review run would score
+    notes: The slice accepts a diff in the request. It does not call GitHub.
+
+  - name: llm_router
+    kind: model
+    status: wired
+    capabilities:
+      - id: complete
+        effect: side_effect
+        description: One completion on the model the router selected.
+    auth:
+      required: false
+      schemes: [api_key]
+      notes: The fake provider needs no key. OpenAI and Anthropic read their keys from the environment.
+    side_effects: [complete]
+    schemas:
+      produces:
+        - midplane.node.code_review.writes
+        - schema_agent.result
+      consumes:
+        - midplane.node.router.writes
+    safety_tier: model
+    real_money: false
+    examples:
+      - Route code_review to fake-small and fall back to fake-large
+      - Call the schema agent under the same cost and latency budget
+    notes: Tests use FakeModelProvider. Real providers are not used by the tests.
+
+  - name: trading_control
+    kind: trading
+    status: planned
+    capabilities:
+      - id: submit_paper
+        effect: side_effect
+        description: Ask the external control service to acknowledge a paper-mode action. Nothing is executed.
+    auth:
+      required: true
+      schemes: [control_service]
+      notes: Broker credentials stay in the external control service. This process has none.
+    side_effects: [submit_paper]
+    schemas:
+      produces:
+        - trading.control.result
+      consumes:
+        - trading.control.action
+    safety_tier: paper_only
+    real_money: false
+    live_use: hard_external_controls_required
+    examples:
+      - Acknowledge a paper-mode action without placing an order
+    notes: >
+      Interface only. PaperOnlyTradingControlClient refuses every mode other than
+      paper and never calls a broker. Hard external controls are required before
+      any live use. The schema agent never selects real-money trading.
+
+  - name: gmail
+    kind: email
+    status: planned
+    capabilities:
+      - id: read_message
+        effect: read
+        description: Read a mailbox message.
+      - id: send
+        effect: side_effect
+        description: Send mail.
+    auth:
+      required: true
+      schemes: [oauth]
+      notes: No Gmail client is registered in this repo.
+    side_effects: [send]
+    schemas:
+      produces: []
+      consumes: []
+    safety_tier: external_write
+    real_money: false
+    examples:
+      - Read a thread that should become a dev_guild episode
+    notes: Planned. Sending mail is a side effect and stays off unless a run allows it.
+
+  - name: google_calendar
+    kind: calendar
+    status: planned
+    capabilities:
+      - id: read_event
+        effect: read
+        description: Read calendar events.
+      - id: write_event
+        effect: write
+        description: Create or change an event.
+    auth:
+      required: true
+      schemes: [oauth]
+      notes: No Calendar client is registered in this repo.
+    side_effects: [write_event]
+    schemas:
+      produces: []
+      consumes: []
+    safety_tier: external_write
+    real_money: false
+    examples:
+      - Read upcoming events before proposing an integration
+    notes: Planned. Writes stay off unless a run allows them.
+
+  - name: google_drive
+    kind: storage
+    status: planned
+    capabilities:
+      - id: read_file
+        effect: read
+        description: Read a Drive file.
+      - id: write_file
+        effect: write
+        description: Create or update a Drive file.
+    auth:
+      required: true
+      schemes: [oauth]
+      notes: No Drive client is registered in this repo.
+    side_effects: [write_file]
+    schemas:
+      produces: []
+      consumes: []
+    safety_tier: external_write
+    real_money: false
+    examples:
+      - Read a spec that should be mapped onto a platform schema
+    notes: Planned. Writes stay off unless a run allows them.
+
+  - name: x
+    kind: social
+    status: planned
+    capabilities:
+      - id: read_post
+        effect: read
+        description: Read a public post.
+      - id: create_post
+        effect: side_effect
+        description: Publish a post.
+    auth:
+      required: true
+      schemes: [oauth]
+      notes: No X client is registered in this repo.
+    side_effects: [create_post]
+    schemas:
+      produces: []
+      consumes: []
+    safety_tier: external_write
+    real_money: false
+    examples:
+      - Read a public post while designing a connector
+    notes: Planned. Publishing is a side effect and stays off unless a run allows it.
+
+  - name: ios_swift_client
+    kind: client
+    status: wired
+    capabilities:
+      - id: read_run
+        effect: read
+        description: Decode a run status from the generated client.
+      - id: read_episode
+        effect: read
+        description: Decode an episode page or episode body.
+      - id: list_agents
+        effect: read
+        description: Decode the agent roster page.
+      - id: stream_events
+        effect: read
+        description: Consume the SSE contract the generator compiled.
+      - id: create_run
+        effect: write
+        description: POST /v1/runs through the generated client.
+    auth:
+      required: true
+      schemes: [bearer]
+      notes: The Swift package is in clients/swift and CI compiles it. No app binary ships in this repo.
+    side_effects: [create_run]
+    schemas:
+      produces:
+        - gateway.component.EpisodeResponse
+      consumes:
+        - gateway.component.CreateRunRequest
+    safety_tier: client
+    real_money: false
+    examples:
+      - Build an iOS call that creates a schema_agent run and reads the episode
+    notes: Wired as a generated client of the gateway contract.

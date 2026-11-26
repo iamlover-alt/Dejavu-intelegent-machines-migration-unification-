@@ -21,13 +21,14 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from midplane.gateway.errors import APIError
 from midplane.gateway.openapi_contract import apply_contract
 from midplane.gateway.keys import hash_token, pepper_from_env
 from midplane.gateway.limiter import RateLimiter
 from midplane.gateway.store import GatewayStore, KeyRecord, RunRecord, utc_now
+from midplane.agents.schema_agent import schema_task
 from midplane.graph import stream_review
 from midplane.retrieval.chain import ChainStep, HopTrace
 from midplane.retrieval.service import RetrievalService
@@ -52,6 +53,8 @@ Rate limiting v0 is per API key inside a single process. Authenticated responses
 
 Auth v1 is not built. The planned path is Sign in with Apple, then a short-lived JWT from this gateway. Bearer API keys stay available for service clients.
 
+`POST /v1/runs` accepts `task_type` `code_review` or `schema_agent`, or an `agent` name (`schema-agent` or `schema_agent`). A code review requires `input.diff`. A schema agent run requires `input.goal` (or a non-default `input.instructions`).
+
 `POST /v1/retrieve` searches episode memory, schema and connector documents, or decision traces.
 Episode and trace hits are limited to the API key's client. A chain spec hops across those stores inside this process.
 The endpoint does not call a model.
@@ -62,18 +65,88 @@ This contract has no trading endpoints.
 _bearer = HTTPBearer(auto_error=False, description="Bearer API key scoped to a client such as ios-dev.")
 
 
+_TASK_TYPES = {"code_review", "schema_agent"}
+_AGENT_TASKS = {
+    "schema_agent": "schema_agent",
+    "schema-agent": "schema_agent",
+    "code_review": "code_review",
+    "code-review": "code_review",
+}
+_DEFAULT_INSTRUCTIONS = "Review this diff."
+
+
+def resolve_run_target(task_type: str | None, agent: str | None) -> str:
+    """Return code_review or schema_agent from a task type, an agent name, or both."""
+
+    agent_key = (agent or "").strip().lower()
+    from_agent = _AGENT_TASKS.get(agent_key) if agent_key else None
+    if agent_key and from_agent is None:
+        raise ValueError("agent must be code_review, code-review, schema_agent, or schema-agent")
+    if task_type and from_agent and task_type != from_agent:
+        raise ValueError("agent and task_type name different workers")
+    resolved = task_type or from_agent
+    if resolved is None:
+        raise ValueError("task_type or agent is required")
+    return resolved
+
+
+def schema_goal_from_input(goal: str | None, instructions: str | None) -> str:
+    text = (goal or "").strip()
+    if text:
+        return text
+    fallback = (instructions or "").strip()
+    if fallback and fallback != _DEFAULT_INSTRUCTIONS:
+        return fallback
+    return ""
+
+
 class RunInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    diff: str = Field(min_length=1, description="Unified diff to review.")
+    diff: str | None = Field(
+        default=None,
+        description="Unified diff to review. Required when the task is code_review.",
+    )
     repo: str = "local"
-    instructions: str = "Review this diff."
+    instructions: str = _DEFAULT_INSTRUCTIONS
+    goal: str | None = Field(
+        default=None,
+        description="Schema, connector, or integration question. Required when the task is schema_agent.",
+    )
+    allow_side_effects: bool = False
+    allow_writes: bool = False
 
 
 class CreateRunRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    task_type: Literal["code_review"]
+    task_type: str | None = Field(
+        default=None,
+        description="Worker to run: code_review or schema_agent. Optional when agent is set. JSON null is allowed.",
+    )
+
+    @field_validator("task_type")
+    @classmethod
+    def known_task_type(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if value not in _TASK_TYPES:
+            raise ValueError("must be code_review or schema_agent")
+        return value
+    agent: str | None = Field(
+        default=None,
+        max_length=100,
+        description="Agent name. schema-agent selects the schema agent. Optional when task_type is set.",
+    )
     input: RunInput
     client_ref: str | None = Field(default=None, max_length=200)
+
+    @model_validator(mode="after")
+    def resolve_target(self) -> CreateRunRequest:
+        self.task_type = resolve_run_target(self.task_type, self.agent)  # type: ignore[assignment]
+        if self.task_type == "code_review" and not (self.input.diff or "").strip():
+            raise ValueError("input.diff is required for code_review")
+        if self.task_type == "schema_agent" and not schema_goal_from_input(self.input.goal, self.input.instructions):
+            raise ValueError("input.goal is required for schema_agent")
+        return self
 
 
 class CreateRunResponse(BaseModel):
@@ -409,26 +482,50 @@ def create_app(
 
     def _execute(run_id: str, payload: dict) -> None:
         gateway.mark_running(run_id)
+        task_type = str(payload.get("task_type") or "code_review")
         observed = utc_now()
         _record_event(
             gateway,
             run_id,
             "run.started",
-            {"run_id": run_id, "task_type": "code_review", "at": observed},
+            {"run_id": run_id, "task_type": task_type, "at": observed},
         )
         worker_episodes = None
         try:
             worker_episodes = open_store(url)
-            for event in stream_review(
-                diff=payload["diff"],
-                repo=payload.get("repo") or "local",
-                instructions=payload.get("instructions") or "Review this diff.",
-                run_id=run_id,
-                thread_id=run_id,
-                source="app",
-                role="code_review",
-                store=worker_episodes,
-            ):
+            if task_type == "schema_agent":
+                goal = schema_goal_from_input(payload.get("goal"), payload.get("instructions"))
+                events = stream_review(
+                    diff=payload.get("diff") or "",
+                    repo=payload.get("repo") or "local",
+                    instructions=goal,
+                    run_id=run_id,
+                    thread_id=run_id,
+                    source="dev_guild",
+                    role="schema_agent",
+                    task=schema_task(
+                        goal,
+                        repo=payload.get("repo") or "local",
+                        diff=payload.get("diff") or "",
+                        constraints={
+                            "allow_side_effects": bool(payload.get("allow_side_effects")),
+                            "allow_writes": bool(payload.get("allow_writes")),
+                        },
+                    ),
+                    store=worker_episodes,
+                )
+            else:
+                events = stream_review(
+                    diff=payload["diff"],
+                    repo=payload.get("repo") or "local",
+                    instructions=payload.get("instructions") or "Review this diff.",
+                    run_id=run_id,
+                    thread_id=run_id,
+                    source="app",
+                    role="code_review",
+                    store=worker_episodes,
+                )
+            for event in events:
                 if event["type"] == "node":
                     at = utc_now()
                     _record_event(gateway, run_id, "node.started", {"node": event["node"], "at": at})
@@ -506,6 +603,8 @@ def create_app(
     def create_run(body: CreateRunRequest, key: KeyRecord = Depends(require_key)) -> CreateRunResponse:
         run_id = str(uuid.uuid4())
         payload = body.input.model_dump()
+        payload["task_type"] = body.task_type
+        payload["agent"] = body.agent
         gateway.insert_run(
             run_id=run_id,
             client_id=key.client_id,
