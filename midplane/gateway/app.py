@@ -29,7 +29,7 @@ from midplane.gateway.keys import hash_token, pepper_from_env
 from midplane.gateway.limiter import RateLimiter
 from midplane.gateway.store import GatewayStore, KeyRecord, RunRecord, utc_now
 from midplane.graph import stream_review
-from midplane.store import EpisodeStore, open_store
+from midplane.store import EpisodeStore, InvalidEpisodeCursor, open_store, resolve_database_url
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +101,27 @@ class EpisodeResponse(BaseModel):
     latency_ms: int
     outcome: str
     quality_score: float
+    score_version: str
+    created_at: str
     trace: list
+
+
+class EpisodeSummary(BaseModel):
+    episode_id: str
+    source: str
+    outcome: str
+    quality_score: float
+    score_version: str
+    created_at: str
+    latency_ms: int
+
+
+class EpisodePage(BaseModel):
+    """next_cursor is JSON null when there is no next page. The key is sent. It may also be omitted."""
+
+    data: list[EpisodeSummary]
+    next_cursor: str | None = None
+    limit: int
 
 
 class Agent(BaseModel):
@@ -212,7 +232,7 @@ def create_app(
     pepper: str | None = None,
     episode_store: EpisodeStore | None = None,
 ) -> FastAPI:
-    url = database_url or os.environ.get("MIDPLANE_DATABASE_URL", "sqlite:///midplane_episodes.sqlite")
+    url = database_url if database_url is not None else resolve_database_url()
     limit = (
         rate_limit_per_minute
         if rate_limit_per_minute is not None
@@ -460,6 +480,41 @@ def create_app(
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
 
+    @app.get("/v1/episodes", response_model=EpisodePage, tags=["episodes"])
+    def list_episodes(
+        source: Literal["dev_guild", "trading", "app"] | None = None,
+        min_score: float | None = Query(default=None, ge=0, le=1),
+        limit: int = Query(default=50, ge=1, le=100),
+        cursor: str | None = None,
+        key: KeyRecord = Depends(require_key),
+    ) -> EpisodePage:
+        try:
+            page, next_cursor = episodes.list_episodes(
+                source=source,
+                min_score=min_score,
+                run_ids=gateway.episode_ids_for_client(key.client_id),
+                cursor=cursor,
+                limit=limit,
+            )
+        except InvalidEpisodeCursor as exc:
+            raise APIError(400, "invalid_cursor", "The cursor is not valid.") from exc
+        return EpisodePage(
+            data=[
+                EpisodeSummary(
+                    episode_id=item.run_id,
+                    source=item.source,
+                    outcome=item.outcome,
+                    quality_score=item.quality_score,
+                    score_version=item.score_version,
+                    created_at=item.created_at,
+                    latency_ms=item.latency_ms,
+                )
+                for item in page
+            ],
+            next_cursor=next_cursor,
+            limit=limit,
+        )
+
     @app.get("/v1/episodes/{episode_id}", response_model=EpisodeResponse, tags=["episodes"])
     def get_episode(episode_id: str, key: KeyRecord = Depends(require_key)) -> EpisodeResponse:
         owned = gateway.find_run_for_episode(episode_id, key.client_id)
@@ -480,6 +535,8 @@ def create_app(
             latency_ms=episode.latency_ms,
             outcome=episode.outcome,
             quality_score=episode.quality_score,
+            score_version=episode.score_version,
+            created_at=episode.created_at,
             trace=episode.trace,
         )
 

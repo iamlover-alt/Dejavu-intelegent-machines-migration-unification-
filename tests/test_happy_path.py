@@ -7,7 +7,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from midplane.graph import build_graph, run_review, tool_allowlist
 from midplane.models import FakeModelProvider
 from midplane.routing import DEFAULT_BUDGET, DEFAULT_ROUTE_TABLE, CostLatencyRoutingPolicy
-from midplane.scoring import stub_quality_score
+from midplane.scoring import HeuristicQualityScorer, StubQualityScorer
 from midplane.store import SqliteEpisodeStore
 from tests.conftest import SAMPLE_DIFF
 
@@ -42,8 +42,9 @@ def test_happy_path_writes_one_episode_and_a_checkpoint(store: SqliteEpisodeStor
     ]
     assert result.episode.source == "dev_guild"
     assert result.episode.outcome == "success"
-    assert result.episode.quality_score == 0.5
-    assert result.episode.quality_score == stub_quality_score(result.state)
+    assert result.episode.score_version == "heuristic-v0"
+    assert result.episode.quality_score == 0.99
+    assert result.episode.quality_score == HeuristicQualityScorer().score(result.state)
     assert store.count("run-happy") == 1
     assert result.episode.trace == result.state["trace"]
     assert result.episode.outputs["findings"]
@@ -54,7 +55,7 @@ def test_happy_path_writes_one_episode_and_a_checkpoint(store: SqliteEpisodeStor
 
     snapshot = result.graph.get_state({"configurable": {"thread_id": "thread-happy"}})
     assert snapshot.values["run_id"] == "run-happy"
-    assert snapshot.values["quality_score"] == 0.5
+    assert snapshot.values["quality_score"] == 0.99
 
 
 def test_compiled_edges_can_exit_to_episode_writer(store: SqliteEpisodeStore):
@@ -80,7 +81,7 @@ def test_fallback_then_success(store: SqliteEpisodeStore):
     assert result.episode.outcome == "success"
     roles = [item.get("role") for item in result.episode.model_choices if item.get("kind") == "attempt"]
     assert roles == ["primary", "fallback"]
-    assert result.state["quality_score"] == 0.5
+    assert result.state["quality_score"] == 0.99
 
 
 def test_unparseable_primary_uses_the_fallback(store: SqliteEpisodeStore):
@@ -96,10 +97,10 @@ def test_both_models_fail_still_persists(store: SqliteEpisodeStore):
     provider = FakeModelProvider(fail_models={"fake-small", "fake-large"})
     result = run_review(SAMPLE_DIFF, store=store, provider=provider, run_id="run-fail")
     assert result.episode.outcome == "error"
-    assert result.episode.quality_score == 0.0
+    assert result.episode.quality_score == 0.30
+    assert result.episode.quality_score == HeuristicQualityScorer().score(result.state)
     assert store.count("run-fail") == 1
     assert "code_review" in _end_nodes(result.episode.trace)
-    assert result.episode.quality_score == stub_quality_score(result.state)
 
 
 def test_same_run_id_upserts_one_row(store: SqliteEpisodeStore):
@@ -120,8 +121,19 @@ def test_unknown_role_skips_the_worker(store: SqliteEpisodeStore):
     )
     assert provider.calls == []
     assert result.episode.outcome == "error"
-    assert result.episode.quality_score == 0.0
+    assert result.episode.quality_score == 0.30
     assert _end_nodes(result.episode.trace) == ["supervisor", "episode_writer"]
+
+
+def test_stub_scorer_can_replace_the_heuristic(store: SqliteEpisodeStore):
+    result = run_review(
+        SAMPLE_DIFF,
+        store=store,
+        scorer=StubQualityScorer(),
+        run_id="run-stub-scorer",
+    )
+    assert result.episode.score_version == "stub-v0"
+    assert result.episode.quality_score == 0.5
 
 
 def _deps(store: SqliteEpisodeStore):

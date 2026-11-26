@@ -17,6 +17,7 @@ services:
       db:
         condition: service_healthy
     environment:
+      DATABASE_URL: postgresql://midplane:midplane@db:5432/midplane
       MIDPLANE_DATABASE_URL: postgresql://midplane:midplane@db:5432/midplane
       MIDPLANE_KEY_PEPPER: dev-pepper-not-for-production
       MIDPLANE_MODEL_PROVIDER: fake

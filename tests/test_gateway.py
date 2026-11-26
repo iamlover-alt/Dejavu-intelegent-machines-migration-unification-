@@ -105,7 +105,9 @@ def test_code_review_run_persists_an_episode_and_streams_nodes(client: TestClien
     episode_body = episode.json()
     assert episode_body["episode_id"] == episode_id
     assert episode_body["source"] == "app"
-    assert episode_body["quality_score"] == 0.5
+    assert episode_body["quality_score"] == 0.99
+    assert episode_body["score_version"] == "heuristic-v0"
+    assert episode_body["created_at"]
     assert {event["node"] for event in episode_body["trace"]} >= {
         "supervisor",
         "router",
@@ -189,16 +191,18 @@ def test_nullable_contract_uses_type_arrays(gateway_app):
         assert "null" in status["properties"][field]["type"]
         assert "anyOf" not in status["properties"][field]
         assert field not in status["required"]
-    page = names["AgentPage"]
-    assert "null" in page["properties"]["next_cursor"]["type"]
-    assert "next_cursor" not in page["required"]
+    for schema_name in ("AgentPage", "EpisodePage"):
+        page = names[schema_name]
+        assert "null" in page["properties"]["next_cursor"]["type"]
+        assert "next_cursor" not in page["required"]
     created = names["CreateRunRequest"]
     assert "null" in created["properties"]["client_ref"]["type"]
     assert "client_ref" not in created.get("required", [])
-    cursor = schema["paths"]["/v1/agents"]["get"]["parameters"]
-    cursor_schema = next(item["schema"] for item in cursor if item["name"] == "cursor")
-    assert "null" in cursor_schema["type"]
-    assert "anyOf" not in cursor_schema
+    for path in ("/v1/agents", "/v1/episodes"):
+        parameters = schema["paths"][path]["get"]["parameters"]
+        cursor_schema = next(item["schema"] for item in parameters if item["name"] == "cursor")
+        assert "null" in cursor_schema["type"]
+        assert "anyOf" not in cursor_schema
     dumped = json.dumps(schema)
     assert '{"type": "null"}' not in dumped
     assert "HTTPValidationError" not in schema["components"]["schemas"]
@@ -221,6 +225,31 @@ def test_nullable_contract_uses_type_arrays(gateway_app):
                 denied = operation["responses"]["429"]
                 assert "Retry-After" in denied["headers"]
                 assert denied["content"]["application/json"]["schema"] == error_ref
+
+
+def test_episode_list_is_filtered_and_scoped(client: TestClient, gateway_app):
+    token = _mint(gateway_app)
+    other = _mint(gateway_app, "ios-other")
+    created = client.post(
+        "/v1/runs",
+        headers=_auth(token),
+        json={"task_type": "code_review", "input": {"diff": SAMPLE_DIFF}},
+    )
+    run_id = created.json()["run_id"]
+    with client.stream("GET", f"/v1/runs/{run_id}/events", headers=_auth(token)) as stream:
+        "".join(stream.iter_text())
+    listed = client.get("/v1/episodes", headers=_auth(token), params={"source": "app", "min_score": 0.5})
+    assert listed.status_code == 200
+    body = listed.json()
+    assert body["limit"] == 50
+    assert [item["episode_id"] for item in body["data"]] == [run_id]
+    assert body["data"][0]["score_version"] == "heuristic-v0"
+    assert body["next_cursor"] is None
+    hidden = client.get("/v1/episodes", headers=_auth(other), params={"source": "app"})
+    assert hidden.json()["data"] == []
+    bad = client.get("/v1/episodes", headers=_auth(token), params={"cursor": "%%%"})
+    assert bad.status_code == 400
+    assert bad.json()["error"]["code"] == "invalid_cursor"
 
 
 def test_other_clients_cannot_read_the_run(client: TestClient, gateway_app):
@@ -317,12 +346,11 @@ def test_openapi_has_no_trading_paths(gateway_app):
         "/v1/runs",
         "/v1/runs/{run_id}",
         "/v1/runs/{run_id}/events",
+        "/v1/episodes",
         "/v1/episodes/{episode_id}",
         "/v1/agents",
     }
-    rendered = json.dumps(paths).lower()
-    assert "trading" not in rendered
-    assert "broker" not in rendered
+    assert all("broker" not in path and "trading" not in path for path in paths)
 
 
 def test_openapi_file_matches_the_served_schema(gateway_app):

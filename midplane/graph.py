@@ -27,9 +27,9 @@ from midplane.routing import (
     choose_model,
     route_table_from_env,
 )
-from midplane.scoring import stub_quality_score
+from midplane.scoring import HeuristicQualityScorer, QualityScorer
 from midplane.state import MidPlaneState, initial_state
-from midplane.store import Episode, EpisodeStore, open_store
+from midplane.store import Episode, EpisodeStore, episode_timestamp, open_store
 
 _BANNED_TOOL_TOKENS = ("broker", "trading", "exchange", "alpaca", "binance", "ccxt", "oanda")
 _SEVERITIES = {"info", "warn", "block"}
@@ -147,6 +147,7 @@ class GraphDeps:
     route_table: dict
     budget: dict
     tools: tuple[str, ...] = ()
+    scorer: QualityScorer | None = None
 
 
 @dataclass
@@ -347,7 +348,10 @@ def build_graph(deps: GraphDeps, checkpointer=None):
             "trace": full_trace,
             "error": error,
         }
-        quality_score = stub_quality_score(score_state)
+        scorer = deps.scorer if deps.scorer is not None else HeuristicQualityScorer()
+        quality_score = scorer.score(score_state)
+        created_at = state.get("created_at") or episode_timestamp()
+        score_version = scorer.version
         episode = Episode(
             run_id=str(state["run_id"]),
             source=str(state["source"]),
@@ -361,6 +365,8 @@ def build_graph(deps: GraphDeps, checkpointer=None):
             outcome=str(outcome),
             quality_score=quality_score,
             trace=full_trace,
+            score_version=score_version,
+            created_at=str(created_at),
         )
         deps.store.upsert(episode)
         return {
@@ -370,6 +376,8 @@ def build_graph(deps: GraphDeps, checkpointer=None):
             "output": output if isinstance(output, dict) else {},
             "cost": cost,
             "quality_score": quality_score,
+            "score_version": score_version,
+            "created_at": str(created_at),
         }
 
     graph = StateGraph(MidPlaneState)
@@ -401,6 +409,7 @@ def _start_run(
     route_table: dict | None,
     budget: dict | None,
     checkpointer,
+    scorer: QualityScorer | None,
 ):
     resolved_run_id = run_id or str(uuid.uuid4())
     resolved_thread_id = thread_id or resolved_run_id
@@ -411,6 +420,7 @@ def _start_run(
         route_table=route_table if route_table is not None else route_table_from_env(),
         budget=budget if budget is not None else budget_from_env(),
         tools=tool_allowlist(),
+        scorer=scorer if scorer is not None else HeuristicQualityScorer(),
     )
     graph = build_graph(deps, checkpointer=checkpointer)
     incoming = initial_state(
@@ -457,6 +467,7 @@ def run_review(
     route_table: dict | None = None,
     budget: dict | None = None,
     checkpointer=None,
+    scorer: QualityScorer | None = None,
 ) -> RunResult:
     deps, graph, incoming, config, resolved_run_id, resolved_thread_id = _start_run(
         diff,
@@ -473,6 +484,7 @@ def run_review(
         route_table=route_table,
         budget=budget,
         checkpointer=checkpointer,
+        scorer=scorer,
     )
     final = graph.invoke(incoming, config=config)
     return _result_from_state(deps, graph, final, resolved_run_id, resolved_thread_id)
@@ -494,6 +506,7 @@ def stream_review(
     route_table: dict | None = None,
     budget: dict | None = None,
     checkpointer=None,
+    scorer: QualityScorer | None = None,
 ):
     """Yield one event per finished node, then a terminal event with the episode.
 
@@ -516,6 +529,7 @@ def stream_review(
         route_table=route_table,
         budget=budget,
         checkpointer=checkpointer,
+        scorer=scorer,
     )
     for update in graph.stream(incoming, config=config, stream_mode="updates"):
         if not isinstance(update, dict):

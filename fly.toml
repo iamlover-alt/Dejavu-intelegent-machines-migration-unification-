@@ -22,6 +22,7 @@ primary_region = "iad"
     timeout = "2s"
 
 [env]
+  # DATABASE_URL is a secret. Set it with `fly secrets set`, not in this file.
   MIDPLANE_MODEL_PROVIDER = "fake"
   MIDPLANE_SEED_DEV_KEY = "0"
   MIDPLANE_HOST = "0.0.0.0"

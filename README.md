@@ -35,6 +35,14 @@ docker compose up --build
 
 The same start is `sh scripts/dev-up.sh`. The contract and the iOS checklist are in [docs/api/gateway-v0.md](docs/api/gateway-v0.md). `GET /healthz` needs no key. Other `/v1` routes use the bearer key from the seed line `dev api key:`.
 
+Export scored episodes for training (SQLite by default, or `DATABASE_URL`):
+
+```bash
+python -m midplane.export --since 2026-11-01T00:00:00.000000Z --min-score 0.5 --source dev_guild --out train.jsonl
+```
+
+The JSONL shape is documented in [docs/architecture/episode-flywheel.md](docs/architecture/episode-flywheel.md).
+
 ## Doc map
 
 | Document | What it decides |
@@ -42,6 +50,7 @@ The same start is `sh scripts/dev-up.sh`. The contract and the iOS checklist are
 | [Mid-plane architecture](docs/architecture/mid-plane.md) | Supervisor, model routing, shared state, the episode flywheel, Dev Guild workers, the trading boundary, observability, the iOS surface, and open questions |
 | [First vertical slice](docs/architecture/first-slice.md) | What to build first: supervisor → router → code-review worker → `episode_writer`, plus acceptance criteria and a test plan |
 | [Gateway API v0](docs/api/gateway-v0.md) | The HTTP contract an iOS app can build against, including auth v0 and the iOS checklist |
+| [Episode flywheel v0](docs/architecture/episode-flywheel.md) | Postgres episodes, heuristic score, JSONL export, and `GET /v1/episodes` |
 | [90-day tracker](docs/plan/90-day-tracker.md) | Placeholder milestones. Replace the rows from `dejavu_90day_plan.xlsx` |
 
 ## How to read

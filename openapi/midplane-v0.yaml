@@ -686,6 +686,201 @@ paths:
 
         The graph reports a node when the node returns. The gateway then appends `node.started`
         and `node.completed` for that node, in that order, with the same `at` timestamp.'
+  /v1/episodes:
+    get:
+      tags:
+      - episodes
+      summary: List Episodes
+      operationId: list_episodes_v1_episodes_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: source
+        in: query
+        required: false
+        schema:
+          title: Source
+          enum:
+          - dev_guild
+          - trading
+          - app
+          type:
+          - string
+          - 'null'
+      - name: min_score
+        in: query
+        required: false
+        schema:
+          title: Min Score
+          maximum: 1
+          minimum: 0
+          type:
+          - number
+          - 'null'
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          default: 50
+          title: Limit
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          title: Cursor
+          type:
+          - string
+          - 'null'
+      - name: X-Request-ID
+        in: header
+        required: false
+        description: Optional caller-supplied id. The response echoes it. The server
+          generates one when the header is omitted.
+        schema: *id001
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EpisodePage'
+          headers:
+            X-Request-ID:
+              description: Echo of the request id, or a server-generated id.
+              required: true
+              schema:
+                type: string
+            RateLimit-Limit:
+              description: Maximum authenticated requests in the current window.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests left in the current window after this response.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the oldest request in the window expires.
+              required: true
+              schema:
+                type: integer
+        '422':
+          description: The request body or parameters failed validation.
+          headers:
+            X-Request-ID:
+              description: Echo of the request id, or a server-generated id.
+              required: true
+              schema:
+                type: string
+            RateLimit-Limit:
+              description: Maximum authenticated requests in the current window.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests left in the current window after this response.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the oldest request in the window expires.
+              required: true
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: The server failed while handling the request.
+          headers:
+            X-Request-ID:
+              description: Echo of the request id, or a server-generated id.
+              required: true
+              schema:
+                type: string
+            RateLimit-Limit:
+              description: Maximum authenticated requests in the current window.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests left in the current window after this response.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the oldest request in the window expires.
+              required: true
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: The bearer API key is missing, unknown, or revoked.
+          headers:
+            X-Request-ID:
+              description: Echo of the request id, or a server-generated id.
+              required: true
+              schema:
+                type: string
+            RateLimit-Limit:
+              description: Maximum authenticated requests in the current window.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests left in the current window after this response.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the oldest request in the window expires.
+              required: true
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: The API key exceeded its request window.
+          headers:
+            X-Request-ID:
+              description: Echo of the request id, or a server-generated id.
+              required: true
+              schema:
+                type: string
+            RateLimit-Limit:
+              description: Maximum authenticated requests in the current window.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests left in the current window after this response.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the oldest request in the window expires.
+              required: true
+              schema:
+                type: integer
+            Retry-After:
+              description: Seconds to wait before retrying. Equal to RateLimit-Reset.
+              required: true
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /v1/episodes/{episode_id}:
     get:
       tags:
@@ -1127,6 +1322,28 @@ components:
       - run_id
       - status
       title: CreateRunResponse
+    EpisodePage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/EpisodeSummary'
+          type: array
+          title: Data
+        next_cursor:
+          title: Next Cursor
+          type:
+          - string
+          - 'null'
+        limit:
+          type: integer
+          title: Limit
+      type: object
+      required:
+      - data
+      - limit
+      title: EpisodePage
+      description: next_cursor is JSON null when there is no next page. The key is
+        sent. It may also be omitted.
     EpisodeResponse:
       properties:
         episode_id:
@@ -1168,6 +1385,12 @@ components:
         quality_score:
           type: number
           title: Quality Score
+        score_version:
+          type: string
+          title: Score Version
+        created_at:
+          type: string
+          title: Created At
         trace:
           items: {}
           type: array
@@ -1185,8 +1408,43 @@ components:
       - latency_ms
       - outcome
       - quality_score
+      - score_version
+      - created_at
       - trace
       title: EpisodeResponse
+    EpisodeSummary:
+      properties:
+        episode_id:
+          type: string
+          title: Episode Id
+        source:
+          type: string
+          title: Source
+        outcome:
+          type: string
+          title: Outcome
+        quality_score:
+          type: number
+          title: Quality Score
+        score_version:
+          type: string
+          title: Score Version
+        created_at:
+          type: string
+          title: Created At
+        latency_ms:
+          type: integer
+          title: Latency Ms
+      type: object
+      required:
+      - episode_id
+      - source
+      - outcome
+      - quality_score
+      - score_version
+      - created_at
+      - latency_ms
+      title: EpisodeSummary
     HealthResponse:
       properties:
         status:

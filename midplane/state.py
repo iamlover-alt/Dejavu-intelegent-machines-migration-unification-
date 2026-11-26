@@ -24,6 +24,8 @@ class MidPlaneState(TypedDict):
     latency_ms: int
     outcome: Literal["success", "error"] | None
     quality_score: float | None
+    score_version: str | None
+    created_at: str | None
     trace: Annotated[list[dict], operator.add]
     error: str | None
 
@@ -57,6 +59,8 @@ def initial_state(
         "latency_ms": 0,
         "outcome": None,
         "quality_score": None,
+        "score_version": None,
+        "created_at": None,
         "trace": [],
         "error": None,
     }
