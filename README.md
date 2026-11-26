@@ -51,6 +51,7 @@ The JSONL shape is documented in [docs/architecture/episode-flywheel.md](docs/ar
 | [First vertical slice](docs/architecture/first-slice.md) | What to build first: supervisor → router → code-review worker → `episode_writer`, plus acceptance criteria and a test plan |
 | [Gateway API v0](docs/api/gateway-v0.md) | The HTTP contract an iOS app can build against, including auth v0 and the iOS checklist |
 | [Episode flywheel v0](docs/architecture/episode-flywheel.md) | Postgres episodes, heuristic score, JSONL export, and `GET /v1/episodes` |
+| [Retrieval layer](docs/architecture/retrieval.md) | Local embedder, episode / schema / trace stores, chaining, and `POST /v1/retrieve` |
 | [90-day tracker](docs/plan/90-day-tracker.md) | Placeholder milestones. Replace the rows from `dejavu_90day_plan.xlsx` |
 
 ## How to read

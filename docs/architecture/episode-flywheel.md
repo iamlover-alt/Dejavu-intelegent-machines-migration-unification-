@@ -84,4 +84,5 @@ The list is scoped to the API key's client. A key cannot page another client's e
 - [Mid-plane architecture](mid-plane.md)
 - [First vertical slice](first-slice.md)
 - [Gateway API v0](../api/gateway-v0.md)
+- [Retrieval layer](retrieval.md)
 - [90-day tracker](../plan/90-day-tracker.md)

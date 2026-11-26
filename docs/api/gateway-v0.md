@@ -51,6 +51,7 @@ python -m midplane.gateway.keys revoke --key-id key_...
 | `GET /v1/runs/{run_id}/events` | bearer | `text/event-stream`. Frames are `run.started`, `node.started`, `node.completed`, `run.completed`, and `run.failed`. |
 | `GET /v1/episodes/{episode_id}` | bearer | The persisted episode, including `trace` and `quality_score`. |
 | `GET /v1/agents` | bearer | Static roster: name, title, status. |
+| `POST /v1/retrieve` | bearer | Body `{store, query, filters?, top_k?, chain?}`. `store` is `episodes`, `schema`, `traces`, or `chain`. Episode and trace hits are limited to the API key's client. The call does not invoke a model. See [retrieval](../architecture/retrieval.md). |
 
 A key is scoped to its client id. `ios-dev` cannot read a run created by another client. The response is `404`, so the other client's ids are not confirmed.
 

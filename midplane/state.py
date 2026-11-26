@@ -28,6 +28,7 @@ class MidPlaneState(TypedDict):
     created_at: str | None
     trace: Annotated[list[dict], operator.add]
     error: str | None
+    retrieval: dict
 
 
 def initial_state(
@@ -63,4 +64,5 @@ def initial_state(
         "created_at": None,
         "trace": [],
         "error": None,
+        "retrieval": {},
     }

@@ -12,6 +12,8 @@ dependencies = [
   "langgraph==1.2.24",
   "fastapi==0.165.0",
   "uvicorn==0.54.0",
+  "numpy==2.2.6",
+  "PyYAML==6.0.4",
 ]
 
 [project.optional-dependencies]
@@ -22,12 +24,15 @@ dev = [
 postgres = [
   "psycopg[binary]==3.3.9",
 ]
+embeddings = [
+  "sentence-transformers==3.4.1",
+]
 
 [tool.setuptools.packages.find]
 include = ["midplane*"]
 
 [tool.setuptools.package-data]
-midplane = ["gateway/roster.json"]
+midplane = ["gateway/roster.json", "retrieval/connectors.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

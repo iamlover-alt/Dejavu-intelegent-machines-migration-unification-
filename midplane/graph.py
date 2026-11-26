@@ -1,5 +1,8 @@
 """LangGraph path: supervisor -> router -> code_review -> episode_writer.
 
+``MIDPLANE_RETRIEVAL=1`` inserts ``retrieve_context`` between the router and
+code_review. The default is off, so the slice edges stay as written here.
+
 RECONCILE with langgraph_nodes_pseudocode.py if node behavior differs.
 Checkpoints use LangGraph's in-memory saver so this slice runs without a
 database server. RECONCILE with langgraph_state_management.md if that
@@ -9,6 +12,7 @@ document names a Postgres checkpointer instead.
 from __future__ import annotations
 
 import json
+import os
 import time
 import uuid
 from dataclasses import dataclass
@@ -20,6 +24,15 @@ from langgraph.graph import END, START, StateGraph
 
 from midplane.models import ModelError, ModelProvider, provider_from_env
 from midplane.prompts import CODE_REVIEW_PROMPT_REF, render_code_review_prompt
+from midplane.retrieval.chain import (
+    DEFAULT_RETRIEVAL_STEPS,
+    ChainStep,
+    RetrievalChain,
+    retrieval_payload,
+    retrieval_prefix,
+)
+from midplane.retrieval.episodes import EpisodeMemoryStore
+from midplane.retrieval.traces import DecisionTraceStore
 from midplane.routing import (
     CostLatencyRoutingPolicy,
     RoutingPolicy,
@@ -139,6 +152,25 @@ def write_episode(state: MidPlaneState) -> str:
     return "episode_writer"
 
 
+def retrieval_enabled_from_env(env: Mapping[str, str] | None = None) -> bool:
+    """The graph calls retrieve_context only when this is on. Default is off."""
+
+    source = os.environ if env is None else env
+    return source.get("MIDPLANE_RETRIEVAL", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _store_url(store: EpisodeStore) -> str | None:
+    dsn = getattr(store, "dsn", None)
+    if isinstance(dsn, str) and dsn:
+        return dsn
+    path = getattr(store, "path", None)
+    if path == ":memory:":
+        return "sqlite:///:memory:"
+    if isinstance(path, str) and path:
+        return "sqlite:///" + path
+    return None
+
+
 @dataclass
 class GraphDeps:
     provider: ModelProvider
@@ -148,6 +180,11 @@ class GraphDeps:
     budget: dict
     tools: tuple[str, ...] = ()
     scorer: QualityScorer | None = None
+    retrieval_enabled: bool = False
+    episode_memory: EpisodeMemoryStore | None = None
+    decision_traces: DecisionTraceStore | None = None
+    retrieval_chain: RetrievalChain | None = None
+    retrieval_steps: tuple[ChainStep, ...] = ()
 
 
 @dataclass
@@ -229,6 +266,26 @@ def build_graph(deps: GraphDeps, checkpointer=None):
         if choice.get("error") or not choice.get("primary"):
             update["error"] = str(choice.get("error") or "no_eligible_model")
             update["outcome"] = "error"
+        if deps.decision_traces is not None:
+            options = [
+                str(model.get("id"))
+                for model in deps.route_table.get("models", [])
+                if isinstance(model, dict) and task_type in model.get("task_types", [])
+            ]
+            criteria = choice.get("criteria") or {}
+            deps.decision_traces.record(
+                agent="router",
+                run_id=str(state.get("run_id") or ""),
+                episode_id=str(state.get("run_id") or ""),
+                decision_point="model_routing",
+                options=options,
+                choice=str(choice.get("primary") or ""),
+                rationale=(
+                    f"primary={choice.get('primary')} fallback={choice.get('fallback')} "
+                    f"criteria={json.dumps(criteria, sort_keys=True)}"
+                ),
+                outcome="unknown",
+            )
         update.update(_timing("router", started, state))
         return update
 
@@ -236,7 +293,7 @@ def build_graph(deps: GraphDeps, checkpointer=None):
         started = time.perf_counter()
         task = state.get("task") or {}
         route = state.get("route") or {}
-        prompt = render_code_review_prompt(
+        prompt = retrieval_prefix(state.get("retrieval") or {}) + render_code_review_prompt(
             repo=str(task.get("repo", "")),
             instructions=str(task.get("instructions", "")),
             diff=str(task.get("diff", "")),
@@ -369,6 +426,25 @@ def build_graph(deps: GraphDeps, checkpointer=None):
             created_at=str(created_at),
         )
         deps.store.upsert(episode)
+        if deps.episode_memory is not None:
+            deps.episode_memory.index_episode(episode)
+        if deps.decision_traces is not None:
+            primary = ""
+            for item in model_choices:
+                if isinstance(item, dict) and item.get("kind") == "route":
+                    primary = str(item.get("primary") or "")
+                    break
+            deps.decision_traces.complete_run(
+                run_id=str(state["run_id"]),
+                episode_id=str(state["run_id"]),
+                outcome="success" if outcome == "success" else "fail",
+                outcome_score=quality_score,
+                choice=primary or str(outcome),
+                rationale=(
+                    f"quality_score={quality_score} score_version={score_version} outcome={outcome}"
+                ),
+                agent="episode_writer",
+            )
         return {
             "trace": [event],
             "latency_ms": latency_ms,
@@ -380,6 +456,32 @@ def build_graph(deps: GraphDeps, checkpointer=None):
             "created_at": str(created_at),
         }
 
+    def retrieve_context(state: MidPlaneState) -> dict:
+        started = time.perf_counter()
+        task = state.get("task") or {}
+        query = " ".join(
+            part
+            for part in (
+                str(task.get("instructions") or ""),
+                str(task.get("repo") or ""),
+                "code review",
+            )
+            if part
+        )
+        if deps.retrieval_chain is None:
+            payload = {"hits": [], "hops": [], "truncated": False, "fused": False}
+        else:
+            result = deps.retrieval_chain.run(query, deps.retrieval_steps or DEFAULT_RETRIEVAL_STEPS)
+            payload = retrieval_payload(result)
+        update = {"retrieval": payload}
+        update.update(_timing("retrieve_context", started, state, hits=len(payload["hits"])))
+        return update
+
+    def review_or_retrieve(state: MidPlaneState) -> str:
+        if state.get("error"):
+            return "episode_writer"
+        return "retrieve_context"
+
     graph = StateGraph(MidPlaneState)
     graph.add_node("supervisor", supervisor)
     graph.add_node("router", router)
@@ -387,7 +489,12 @@ def build_graph(deps: GraphDeps, checkpointer=None):
     graph.add_node("episode_writer", episode_writer)
     graph.add_edge(START, "supervisor")
     graph.add_conditional_edges("supervisor", route_or_write, ["router", "episode_writer"])
-    graph.add_conditional_edges("router", review_or_write, ["code_review", "episode_writer"])
+    if deps.retrieval_enabled:
+        graph.add_node("retrieve_context", retrieve_context)
+        graph.add_conditional_edges("router", review_or_retrieve, ["retrieve_context", "episode_writer"])
+        graph.add_edge("retrieve_context", "code_review")
+    else:
+        graph.add_conditional_edges("router", review_or_write, ["code_review", "episode_writer"])
     graph.add_conditional_edges("code_review", write_episode, ["episode_writer"])
     graph.add_edge("episode_writer", END)
     return graph.compile(checkpointer=checkpointer if checkpointer is not None else MemorySaver())
@@ -410,17 +517,52 @@ def _start_run(
     budget: dict | None,
     checkpointer,
     scorer: QualityScorer | None,
+    retrieval_enabled: bool | None,
+    episode_memory: EpisodeMemoryStore | None,
+    decision_traces: DecisionTraceStore | None,
+    retrieval_chain: RetrievalChain | None,
+    retrieval_steps: tuple[ChainStep, ...] | None,
 ):
     resolved_run_id = run_id or str(uuid.uuid4())
     resolved_thread_id = thread_id or resolved_run_id
+    resolved_store = store if store is not None else open_store()
+    resolved_provider = provider if provider is not None else provider_from_env()
+    enabled = retrieval_enabled_from_env() if retrieval_enabled is None else retrieval_enabled
+    memory = episode_memory
+    traces = decision_traces
+    chain = retrieval_chain
+    steps = retrieval_steps if retrieval_steps is not None else ()
+    if enabled and memory is None:
+        memory = EpisodeMemoryStore(database_url=_store_url(resolved_store))
+        memory.reindex(resolved_store)
+    if enabled and traces is None:
+        url = _store_url(resolved_store)
+        trace_url = url if url and not url.endswith(":memory:") else "sqlite:///:memory:"
+        traces = DecisionTraceStore(trace_url)
+    if enabled and chain is None:
+        from midplane.retrieval.schema_store import SchemaConnectorStore
+
+        schema = SchemaConnectorStore(database_url=_store_url(resolved_store))
+        chain = RetrievalChain(
+            stores={"episodes": memory, "schema": schema, "traces": traces},
+            max_hops=2,
+            provider=resolved_provider,
+        )
+        if not steps:
+            steps = DEFAULT_RETRIEVAL_STEPS
     deps = GraphDeps(
-        provider=provider if provider is not None else provider_from_env(),
-        store=store if store is not None else open_store(),
+        provider=resolved_provider,
+        store=resolved_store,
         policy=policy if policy is not None else CostLatencyRoutingPolicy(),
         route_table=route_table if route_table is not None else route_table_from_env(),
         budget=budget if budget is not None else budget_from_env(),
         tools=tool_allowlist(),
         scorer=scorer if scorer is not None else HeuristicQualityScorer(),
+        retrieval_enabled=enabled,
+        episode_memory=memory,
+        decision_traces=traces,
+        retrieval_chain=chain,
+        retrieval_steps=steps,
     )
     graph = build_graph(deps, checkpointer=checkpointer)
     incoming = initial_state(
@@ -468,6 +610,11 @@ def run_review(
     budget: dict | None = None,
     checkpointer=None,
     scorer: QualityScorer | None = None,
+    retrieval_enabled: bool | None = None,
+    episode_memory: EpisodeMemoryStore | None = None,
+    decision_traces: DecisionTraceStore | None = None,
+    retrieval_chain: RetrievalChain | None = None,
+    retrieval_steps: tuple[ChainStep, ...] | None = None,
 ) -> RunResult:
     deps, graph, incoming, config, resolved_run_id, resolved_thread_id = _start_run(
         diff,
@@ -485,6 +632,11 @@ def run_review(
         budget=budget,
         checkpointer=checkpointer,
         scorer=scorer,
+        retrieval_enabled=retrieval_enabled,
+        episode_memory=episode_memory,
+        decision_traces=decision_traces,
+        retrieval_chain=retrieval_chain,
+        retrieval_steps=retrieval_steps,
     )
     final = graph.invoke(incoming, config=config)
     return _result_from_state(deps, graph, final, resolved_run_id, resolved_thread_id)
@@ -507,6 +659,11 @@ def stream_review(
     budget: dict | None = None,
     checkpointer=None,
     scorer: QualityScorer | None = None,
+    retrieval_enabled: bool | None = None,
+    episode_memory: EpisodeMemoryStore | None = None,
+    decision_traces: DecisionTraceStore | None = None,
+    retrieval_chain: RetrievalChain | None = None,
+    retrieval_steps: tuple[ChainStep, ...] | None = None,
 ):
     """Yield one event per finished node, then a terminal event with the episode.
 
@@ -530,6 +687,11 @@ def stream_review(
         budget=budget,
         checkpointer=checkpointer,
         scorer=scorer,
+        retrieval_enabled=retrieval_enabled,
+        episode_memory=episode_memory,
+        decision_traces=decision_traces,
+        retrieval_chain=retrieval_chain,
+        retrieval_steps=retrieval_steps,
     )
     for update in graph.stream(incoming, config=config, stream_mode="updates"):
         if not isinstance(update, dict):
