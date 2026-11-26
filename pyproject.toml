@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools==84.2.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "midplane"
+version = "0.1.0"
+description = "Dejavú Intelligent Machines mid-plane: Dev Guild website agent"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "langgraph==1.2.24",
+  "pydantic==2.12.5",
+  "PyYAML==6.0.3",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest==9.2.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["midplane*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

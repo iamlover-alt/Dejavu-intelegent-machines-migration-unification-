@@ -19,12 +19,23 @@ This change is the architecture baseline. Implementation starts with the [first 
 | [Mid-plane architecture](docs/architecture/mid-plane.md) | Supervisor, model routing, shared state, the episode flywheel, Dev Guild workers, the trading boundary, observability, the iOS surface, and open questions |
 | [First vertical slice](docs/architecture/first-slice.md) | What to build first: supervisor → router → code-review worker → `episode_writer`, plus acceptance criteria and a test plan |
 | [90-day tracker](docs/plan/90-day-tracker.md) | Placeholder milestones. Replace the rows from `dejavu_90day_plan.xlsx` |
+| [Website agent](docs/agents/website-agent.md) | Dev Guild Squarespace worker: audit, copy, and an implementation guide |
 
 ## How to read
 
 1. [Mid-plane architecture](docs/architecture/mid-plane.md) for the decisions.
 2. [First vertical slice](docs/architecture/first-slice.md) for the build order and the tests that prove it.
 3. [90-day tracker](docs/plan/90-day-tracker.md) for the placeholder plan skeleton.
+4. [Website agent](docs/agents/website-agent.md) for the Squarespace Dev Guild worker.
+
+## Website agent
+
+The website agent is a Dev Guild worker for Squarespace design. It audits a structured site snapshot, writes page copy from a brief, and returns an ordered implementation guide for déjàvuintelligentmachines.com. It does not buy a plan, change DNS, or call an external service. Behavior and tests are in the [website agent doc](docs/agents/website-agent.md).
+
+```bash
+python -m pip install -e ".[dev]"
+python -m pytest
+```
 
 ## Invariants
 

@@ -1,0 +1,39 @@
+# Current state of déjàvuintelligentmachines.com. Facts for the guide and
+# for copy. This fixture does not apply DNS and does not publish a site.
+domain: déjàvuintelligentmachines.com
+punycode: xn--djvuintelligentmachines-54b7t.com
+registration:
+  via: Google Workspace
+  squarespace_domains_account_activated: false
+hosting:
+  kind: github_pages
+  repo: iamlover-alt/dejavu-website
+  status: in_progress
+  cost: free
+dns_plan:
+  a_records:
+    - 185.199.108.153
+    - 185.199.109.153
+    - 185.199.110.153
+    - 185.199.111.153
+  www_cname: iamlover-alt.github.io
+  applied: false
+brand:
+  logo: DV single-line monogram with circuit nodes
+  colors:
+    - cyan
+    - violet
+    - navy
+  color_note: Cyan and violet on navy. This fixture does not invent hex values.
+  wordmark: "DEJAVÚ / INTELLIGENT MACHINES"
+topics:
+  - A unified AI platform.
+  - Mid-plane orchestration on LangGraph with dynamic routing.
+  - The episode data flywheel.
+  - Composable multi-agent systems.
+  - Schema and connector integration via MCP.
+  - Trading controls that are paper-only behind hard external controls.
+  - Observability.
+  - Vision.
+trading_rule: >-
+  Trading copy must say paper-only. It must not suggest real-money trading.
