@@ -44,6 +44,23 @@ final class ContractDecodingTests: XCTestCase {
         XCTAssertNil(omitted.nextCursor)
     }
 
+    func testErrorEnvelopeDecodesWithAndWithoutDetails() throws {
+        let validation = """
+        {"error":{"code":"validation_error","message":"task_type: bad","request_id":"req_1","details":[{"field":"task_type","issue":"bad"}]}}
+        """.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(Components.Schemas.Error.self, from: validation)
+        XCTAssertEqual(decoded.error.code, "validation_error")
+        XCTAssertEqual(decoded.error.requestId, "req_1")
+        XCTAssertEqual(decoded.error.details?.first?.field, "task_type")
+
+        let plain = """
+        {"error":{"code":"unauthorized","message":"no","request_id":"req_2"}}
+        """.data(using: .utf8)!
+        let omitted = try JSONDecoder().decode(Components.Schemas.Error.self, from: plain)
+        XCTAssertEqual(omitted.error.code, "unauthorized")
+        XCTAssertNil(omitted.error.details)
+    }
+
     func testTerminalEventPayloadsDecodeNullEpisodeId() throws {
         let failed = """
         {"run_id":"run-1","status":"failed","episode_id":null,"error":"boom","at":"2026-11-25T00:00:00.000000Z"}

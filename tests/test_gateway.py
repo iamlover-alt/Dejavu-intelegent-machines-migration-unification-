@@ -201,6 +201,26 @@ def test_nullable_contract_uses_type_arrays(gateway_app):
     assert "anyOf" not in cursor_schema
     dumped = json.dumps(schema)
     assert '{"type": "null"}' not in dumped
+    assert "HTTPValidationError" not in schema["components"]["schemas"]
+    assert "ValidationError" not in schema["components"]["schemas"]
+    error_ref = {"$ref": "#/components/schemas/Error"}
+    for path, path_item in schema["paths"].items():
+        for method, operation in path_item.items():
+            if method not in {"get", "post", "put", "patch", "delete"}:
+                continue
+            names = [item.get("name") for item in operation.get("parameters", [])]
+            assert "X-Request-ID" in names
+            for status, response in operation["responses"].items():
+                header_names = set(response.get("headers", {}))
+                assert "X-Request-ID" in header_names
+                if status.startswith(("4", "5")):
+                    assert response["content"]["application/json"]["schema"] == error_ref
+                if operation.get("security"):
+                    assert {"RateLimit-Limit", "RateLimit-Remaining", "RateLimit-Reset"} <= header_names
+            if operation.get("security"):
+                denied = operation["responses"]["429"]
+                assert "Retry-After" in denied["headers"]
+                assert denied["content"]["application/json"]["schema"] == error_ref
 
 
 def test_other_clients_cannot_read_the_run(client: TestClient, gateway_app):
@@ -229,7 +249,13 @@ def test_unknown_task_type_uses_the_error_shape(client: TestClient, gateway_app)
         json={"task_type": "trade", "input": {"diff": SAMPLE_DIFF}},
     )
     assert response.status_code == 422
-    assert response.json()["error"]["code"] == "validation_error"
+    body = response.json()
+    assert set(body) == {"error"}
+    assert body["error"]["code"] == "validation_error"
+    assert body["error"]["request_id"]
+    assert response.headers["x-request-id"] == body["error"]["request_id"]
+    details = body["error"]["details"]
+    assert any(item["field"] == "task_type" and item["issue"] for item in details)
 
 
 def test_agents_roster_paginates_in_order(client: TestClient, gateway_app):
@@ -266,7 +292,13 @@ def test_rate_limit(tmp_path):
     blocked = client.get("/v1/agents", headers=headers)
     assert blocked.status_code == 429
     assert blocked.json()["error"]["code"] == "rate_limited"
-    assert blocked.headers["retry-after"] == "60"
+    assert "details" not in blocked.json()["error"]
+    assert blocked.headers["retry-after"] == blocked.headers["ratelimit-reset"]
+    assert int(blocked.headers["ratelimit-reset"]) >= 1
+    assert blocked.headers["ratelimit-limit"] == "2"
+    assert blocked.headers["ratelimit-remaining"] == "0"
+    allowed = client.get("/healthz")
+    assert "ratelimit-limit" not in {name.lower() for name in allowed.headers}
     app.state.gateway.close()
     app.state.episodes.close()
 
