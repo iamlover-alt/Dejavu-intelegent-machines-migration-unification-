@@ -48,7 +48,7 @@ final class ContractDecodingTests: XCTestCase {
         let validation = """
         {"error":{"code":"validation_error","message":"task_type: bad","request_id":"req_1","details":[{"field":"task_type","issue":"bad"}]}}
         """.data(using: .utf8)!
-        let decoded = try JSONDecoder().decode(Components.Schemas.Error.self, from: validation)
+        let decoded = try JSONDecoder().decode(Components.Schemas.GatewayErrorEnvelope.self, from: validation)
         XCTAssertEqual(decoded.error.code, "validation_error")
         XCTAssertEqual(decoded.error.requestId, "req_1")
         XCTAssertEqual(decoded.error.details?.first?.field, "task_type")
@@ -56,7 +56,7 @@ final class ContractDecodingTests: XCTestCase {
         let plain = """
         {"error":{"code":"unauthorized","message":"no","request_id":"req_2"}}
         """.data(using: .utf8)!
-        let omitted = try JSONDecoder().decode(Components.Schemas.Error.self, from: plain)
+        let omitted = try JSONDecoder().decode(Components.Schemas.GatewayErrorEnvelope.self, from: plain)
         XCTAssertEqual(omitted.error.code, "unauthorized")
         XCTAssertNil(omitted.error.details)
     }

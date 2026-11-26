@@ -3,3 +3,6 @@ generate:
   - client
 accessModifier: internal
 namingStrategy: idiomatic
+# The OpenAPI component stays named Error. Swift.Error makes Components.Schemas.Error unusable in tests.
+nameOverrides:
+  Error: GatewayErrorEnvelope
