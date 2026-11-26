@@ -255,7 +255,7 @@ Transport, authentication, pagination, and whether the client polls or receives 
 
 > RECONCILE with `integration_guide.md`
 
-Until that reconciliation, the architectural commitment is the three operations and the rule that `source=app` runs are ordinary graph runs: same supervisor, same router, same episode writer.
+Until that reconciliation, the architectural commitment is the three operations and the rule that `source=app` runs are ordinary graph runs: same supervisor, same router, same episode writer. The first HTTP shape of that surface is [Gateway API v0](../api/gateway-v0.md).
 
 ## Open questions
 

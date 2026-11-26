@@ -16,3 +16,10 @@ jobs:
         run: python -m pip install -e ".[dev]"
       - name: Test
         run: python -m pytest
+
+  swift-client:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate and compile the Swift client
+        run: sh scripts/generate-swift-client.sh

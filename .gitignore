@@ -7,3 +7,5 @@ dist/
 build/
 *.sqlite
 *.sqlite3
+.dev-api-key
+midplane_openapi.sqlite

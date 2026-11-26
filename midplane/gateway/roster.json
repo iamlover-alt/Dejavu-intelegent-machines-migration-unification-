@@ -1,0 +1,12 @@
+[
+  {"name": "bot-builder", "title": "Bot Builder", "status": "active"},
+  {"name": "storefront", "title": "Storefront", "status": "active"},
+  {"name": "front-desk", "title": "Front Desk", "status": "active"},
+  {"name": "grok-bot", "title": "Grok Bot", "status": "active"},
+  {"name": "money-desk", "title": "Money Desk", "status": "active"},
+  {"name": "skeptic-lab", "title": "Skeptic Lab", "status": "active"},
+  {"name": "neutral-ops", "title": "Neutral Ops", "status": "active"},
+  {"name": "platform-architect", "title": "Platform Architect", "status": "active"},
+  {"name": "ghost-engineer", "title": "Ghost Engineer", "status": "active"},
+  {"name": "ios-studio", "title": "iOS Studio", "status": "active"}
+]

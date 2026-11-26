@@ -1,0 +1,1469 @@
+openapi: 3.1.0
+info:
+  title: Mid-plane Gateway API
+  summary: v0 HTTP contract for iOS and other clients.
+  description: 'Mid-plane Gateway API v0. Paths live under /v1. This document''s version
+    is 0.1.0.
+
+
+    Authentication v0: `Authorization: Bearer <api key>` on every path except `GET
+    /healthz`.
+
+    Keys are scoped to a client id such as `ios-dev`. A key reads only the runs and
+    episodes created with that key.
+
+
+    Errors use one shape: `{"error": {"code": string, "message": string, "request_id":
+    string}}`.
+
+    Every response carries `X-Request-ID`. Clients may send that header; otherwise
+    the server generates one.
+
+
+    Pagination: list bodies are `{"data": [...], "next_cursor": string | null, "limit":
+    integer}`.
+
+    `limit` defaults to 50 and must be from 1 to 100. `cursor` is opaque. Send `next_cursor`
+    back as `cursor` for the next page. An unknown cursor returns `invalid_cursor`.
+
+
+    Rate limiting v0 is per API key inside a single process. Authenticated responses
+    include `RateLimit-Limit`, `RateLimit-Remaining`, and `RateLimit-Reset` (seconds
+    until the window moves). Over the limit, the status is 429, the code is `rate_limited`,
+    and the response also includes `Retry-After`.
+
+
+    Auth v1 is not built. The planned path is Sign in with Apple, then a short-lived
+    JWT from this gateway. Bearer API keys stay available for service clients.
+
+
+    This contract has no trading endpoints.'
+  version: 0.1.0
+servers:
+- url: http://localhost:8000
+  description: Local
+paths:
+  /healthz:
+    get:
+      tags:
+      - health
+      summary: Healthz
+      operationId: healthz_healthz_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+          headers:
+            X-Request-ID:
+              description: Echo of the request id, or a server-generated id.
+              required: true
+              schema:
+                type: string
+        '422':
+          description: The request body or parameters failed validation.
+          headers:
+            X-Request-ID:
+              description: Echo of the request id, or a server-generated id.
+              required: true
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: The server failed while handling the request.
+          headers:
+            X-Request-ID:
+              description: Echo of the request id, or a server-generated id.
+              required: true
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: X-Request-ID
+        in: header
+        required: false
+        description: Optional caller-supplied id. The response echoes it. The server
+          generates one when the header is omitted.
+        schema: &id001
+          type: string
+  /v1/runs:
+    post:
+      tags:
+      - runs
+      summary: Create Run
+      operationId: create_run_v1_runs_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRunRequest'
+        required: true
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateRunResponse'
+          headers:
+            X-Request-ID:
+              description: Echo of the request id, or a server-generated id.
+              required: true
+              schema:
+                type: string
+            RateLimit-Limit:
+              description: Maximum authenticated requests in the current window.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests left in the current window after this response.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the oldest request in the window expires.
+              required: true
+              schema:
+                type: integer
+        '422':
+          description: The request body or parameters failed validation.
+          headers:
+            X-Request-ID:
+              description: Echo of the request id, or a server-generated id.
+              required: true
+              schema:
+                type: string
+            RateLimit-Limit:
+              description: Maximum authenticated requests in the current window.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests left in the current window after this response.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the oldest request in the window expires.
+              required: true
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: The server failed while handling the request.
+          headers:
+            X-Request-ID:
+              description: Echo of the request id, or a server-generated id.
+              required: true
+              schema:
+                type: string
+            RateLimit-Limit:
+              description: Maximum authenticated requests in the current window.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests left in the current window after this response.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the oldest request in the window expires.
+              required: true
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: The bearer API key is missing, unknown, or revoked.
+          headers:
+            X-Request-ID:
+              description: Echo of the request id, or a server-generated id.
+              required: true
+              schema:
+                type: string
+            RateLimit-Limit:
+              description: Maximum authenticated requests in the current window.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests left in the current window after this response.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the oldest request in the window expires.
+              required: true
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: The API key exceeded its request window.
+          headers:
+            X-Request-ID:
+              description: Echo of the request id, or a server-generated id.
+              required: true
+              schema:
+                type: string
+            RateLimit-Limit:
+              description: Maximum authenticated requests in the current window.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests left in the current window after this response.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the oldest request in the window expires.
+              required: true
+              schema:
+                type: integer
+            Retry-After:
+              description: Seconds to wait before retrying. Equal to RateLimit-Reset.
+              required: true
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: X-Request-ID
+        in: header
+        required: false
+        description: Optional caller-supplied id. The response echoes it. The server
+          generates one when the header is omitted.
+        schema: *id001
+  /v1/runs/{run_id}:
+    get:
+      tags:
+      - runs
+      summary: Get Run
+      operationId: get_run_v1_runs__run_id__get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Run Id
+      - name: X-Request-ID
+        in: header
+        required: false
+        description: Optional caller-supplied id. The response echoes it. The server
+          generates one when the header is omitted.
+        schema: *id001
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunStatusResponse'
+          headers:
+            X-Request-ID:
+              description: Echo of the request id, or a server-generated id.
+              required: true
+              schema:
+                type: string
+            RateLimit-Limit:
+              description: Maximum authenticated requests in the current window.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests left in the current window after this response.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the oldest request in the window expires.
+              required: true
+              schema:
+                type: integer
+        '422':
+          description: The request body or parameters failed validation.
+          headers:
+            X-Request-ID:
+              description: Echo of the request id, or a server-generated id.
+              required: true
+              schema:
+                type: string
+            RateLimit-Limit:
+              description: Maximum authenticated requests in the current window.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests left in the current window after this response.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the oldest request in the window expires.
+              required: true
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: The server failed while handling the request.
+          headers:
+            X-Request-ID:
+              description: Echo of the request id, or a server-generated id.
+              required: true
+              schema:
+                type: string
+            RateLimit-Limit:
+              description: Maximum authenticated requests in the current window.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests left in the current window after this response.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the oldest request in the window expires.
+              required: true
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: The bearer API key is missing, unknown, or revoked.
+          headers:
+            X-Request-ID:
+              description: Echo of the request id, or a server-generated id.
+              required: true
+              schema:
+                type: string
+            RateLimit-Limit:
+              description: Maximum authenticated requests in the current window.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests left in the current window after this response.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the oldest request in the window expires.
+              required: true
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: The API key exceeded its request window.
+          headers:
+            X-Request-ID:
+              description: Echo of the request id, or a server-generated id.
+              required: true
+              schema:
+                type: string
+            RateLimit-Limit:
+              description: Maximum authenticated requests in the current window.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests left in the current window after this response.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the oldest request in the window expires.
+              required: true
+              schema:
+                type: integer
+            Retry-After:
+              description: Seconds to wait before retrying. Equal to RateLimit-Reset.
+              required: true
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: The resource was not found for this client.
+          headers:
+            X-Request-ID:
+              description: Echo of the request id, or a server-generated id.
+              required: true
+              schema:
+                type: string
+            RateLimit-Limit:
+              description: Maximum authenticated requests in the current window.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests left in the current window after this response.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the oldest request in the window expires.
+              required: true
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/runs/{run_id}/events:
+    get:
+      tags:
+      - runs
+      summary: Run Events
+      operationId: run_events_v1_runs__run_id__events_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Run Id
+      - name: Last-Event-ID
+        in: header
+        required: false
+        schema:
+          title: Last-Event-Id
+          type:
+          - string
+          - 'null'
+      - name: X-Request-ID
+        in: header
+        required: false
+        description: Optional caller-supplied id. The response echoes it. The server
+          generates one when the header is omitted.
+        schema: *id001
+      responses:
+        '200':
+          description: 'Server-Sent Events for one run. Each frame is three lines:
+            `id`, `event`, and `data`, then a blank line.
+
+
+            `id` is a decimal integer, monotonic per run, starting at 1. It is stored
+            with the run, not per connection.
+
+            Send it back as the `Last-Event-ID` request header to resume. The server
+            replays frames whose id is greater than that value.
+
+            If the header is missing, not an integer, or not an id this run has stored,
+            the server replays the whole log.
+
+
+            `event` is one of `run.started`, `node.started`, `node.completed`, `run.completed`,
+            `run.failed`.
+
+            `data` is one JSON object. Its shape is the schema named for that event.
+
+
+            The graph reports a node when the node returns. The gateway then appends
+            `node.started` and `node.completed` for that node, in that order, with
+            the same `at` timestamp.'
+          content:
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/RunEvent'
+          headers:
+            X-Request-ID:
+              description: Echo of the request id, or a server-generated id.
+              required: true
+              schema:
+                type: string
+            RateLimit-Limit:
+              description: Maximum authenticated requests in the current window.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests left in the current window after this response.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the oldest request in the window expires.
+              required: true
+              schema:
+                type: integer
+        '422':
+          description: The request body or parameters failed validation.
+          headers:
+            X-Request-ID:
+              description: Echo of the request id, or a server-generated id.
+              required: true
+              schema:
+                type: string
+            RateLimit-Limit:
+              description: Maximum authenticated requests in the current window.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests left in the current window after this response.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the oldest request in the window expires.
+              required: true
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: The server failed while handling the request.
+          headers:
+            X-Request-ID:
+              description: Echo of the request id, or a server-generated id.
+              required: true
+              schema:
+                type: string
+            RateLimit-Limit:
+              description: Maximum authenticated requests in the current window.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests left in the current window after this response.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the oldest request in the window expires.
+              required: true
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: The bearer API key is missing, unknown, or revoked.
+          headers:
+            X-Request-ID:
+              description: Echo of the request id, or a server-generated id.
+              required: true
+              schema:
+                type: string
+            RateLimit-Limit:
+              description: Maximum authenticated requests in the current window.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests left in the current window after this response.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the oldest request in the window expires.
+              required: true
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: The API key exceeded its request window.
+          headers:
+            X-Request-ID:
+              description: Echo of the request id, or a server-generated id.
+              required: true
+              schema:
+                type: string
+            RateLimit-Limit:
+              description: Maximum authenticated requests in the current window.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests left in the current window after this response.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the oldest request in the window expires.
+              required: true
+              schema:
+                type: integer
+            Retry-After:
+              description: Seconds to wait before retrying. Equal to RateLimit-Reset.
+              required: true
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: The resource was not found for this client.
+          headers:
+            X-Request-ID:
+              description: Echo of the request id, or a server-generated id.
+              required: true
+              schema:
+                type: string
+            RateLimit-Limit:
+              description: Maximum authenticated requests in the current window.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests left in the current window after this response.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the oldest request in the window expires.
+              required: true
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      description: 'Server-Sent Events for one run. Each frame is three lines: `id`,
+        `event`, and `data`, then a blank line.
+
+
+        `id` is a decimal integer, monotonic per run, starting at 1. It is stored
+        with the run, not per connection.
+
+        Send it back as the `Last-Event-ID` request header to resume. The server replays
+        frames whose id is greater than that value.
+
+        If the header is missing, not an integer, or not an id this run has stored,
+        the server replays the whole log.
+
+
+        `event` is one of `run.started`, `node.started`, `node.completed`, `run.completed`,
+        `run.failed`.
+
+        `data` is one JSON object. Its shape is the schema named for that event.
+
+
+        The graph reports a node when the node returns. The gateway then appends `node.started`
+        and `node.completed` for that node, in that order, with the same `at` timestamp.'
+  /v1/episodes/{episode_id}:
+    get:
+      tags:
+      - episodes
+      summary: Get Episode
+      operationId: get_episode_v1_episodes__episode_id__get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: episode_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Episode Id
+      - name: X-Request-ID
+        in: header
+        required: false
+        description: Optional caller-supplied id. The response echoes it. The server
+          generates one when the header is omitted.
+        schema: *id001
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EpisodeResponse'
+          headers:
+            X-Request-ID:
+              description: Echo of the request id, or a server-generated id.
+              required: true
+              schema:
+                type: string
+            RateLimit-Limit:
+              description: Maximum authenticated requests in the current window.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests left in the current window after this response.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the oldest request in the window expires.
+              required: true
+              schema:
+                type: integer
+        '422':
+          description: The request body or parameters failed validation.
+          headers:
+            X-Request-ID:
+              description: Echo of the request id, or a server-generated id.
+              required: true
+              schema:
+                type: string
+            RateLimit-Limit:
+              description: Maximum authenticated requests in the current window.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests left in the current window after this response.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the oldest request in the window expires.
+              required: true
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: The server failed while handling the request.
+          headers:
+            X-Request-ID:
+              description: Echo of the request id, or a server-generated id.
+              required: true
+              schema:
+                type: string
+            RateLimit-Limit:
+              description: Maximum authenticated requests in the current window.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests left in the current window after this response.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the oldest request in the window expires.
+              required: true
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: The bearer API key is missing, unknown, or revoked.
+          headers:
+            X-Request-ID:
+              description: Echo of the request id, or a server-generated id.
+              required: true
+              schema:
+                type: string
+            RateLimit-Limit:
+              description: Maximum authenticated requests in the current window.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests left in the current window after this response.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the oldest request in the window expires.
+              required: true
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: The API key exceeded its request window.
+          headers:
+            X-Request-ID:
+              description: Echo of the request id, or a server-generated id.
+              required: true
+              schema:
+                type: string
+            RateLimit-Limit:
+              description: Maximum authenticated requests in the current window.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests left in the current window after this response.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the oldest request in the window expires.
+              required: true
+              schema:
+                type: integer
+            Retry-After:
+              description: Seconds to wait before retrying. Equal to RateLimit-Reset.
+              required: true
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: The resource was not found for this client.
+          headers:
+            X-Request-ID:
+              description: Echo of the request id, or a server-generated id.
+              required: true
+              schema:
+                type: string
+            RateLimit-Limit:
+              description: Maximum authenticated requests in the current window.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests left in the current window after this response.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the oldest request in the window expires.
+              required: true
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/agents:
+    get:
+      tags:
+      - agents
+      summary: List Agents
+      operationId: list_agents_v1_agents_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          default: 50
+          title: Limit
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          title: Cursor
+          type:
+          - string
+          - 'null'
+      - name: X-Request-ID
+        in: header
+        required: false
+        description: Optional caller-supplied id. The response echoes it. The server
+          generates one when the header is omitted.
+        schema: *id001
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentPage'
+          headers:
+            X-Request-ID:
+              description: Echo of the request id, or a server-generated id.
+              required: true
+              schema:
+                type: string
+            RateLimit-Limit:
+              description: Maximum authenticated requests in the current window.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests left in the current window after this response.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the oldest request in the window expires.
+              required: true
+              schema:
+                type: integer
+        '422':
+          description: The request body or parameters failed validation.
+          headers:
+            X-Request-ID:
+              description: Echo of the request id, or a server-generated id.
+              required: true
+              schema:
+                type: string
+            RateLimit-Limit:
+              description: Maximum authenticated requests in the current window.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests left in the current window after this response.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the oldest request in the window expires.
+              required: true
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: The server failed while handling the request.
+          headers:
+            X-Request-ID:
+              description: Echo of the request id, or a server-generated id.
+              required: true
+              schema:
+                type: string
+            RateLimit-Limit:
+              description: Maximum authenticated requests in the current window.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests left in the current window after this response.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the oldest request in the window expires.
+              required: true
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: The bearer API key is missing, unknown, or revoked.
+          headers:
+            X-Request-ID:
+              description: Echo of the request id, or a server-generated id.
+              required: true
+              schema:
+                type: string
+            RateLimit-Limit:
+              description: Maximum authenticated requests in the current window.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests left in the current window after this response.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the oldest request in the window expires.
+              required: true
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: The API key exceeded its request window.
+          headers:
+            X-Request-ID:
+              description: Echo of the request id, or a server-generated id.
+              required: true
+              schema:
+                type: string
+            RateLimit-Limit:
+              description: Maximum authenticated requests in the current window.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests left in the current window after this response.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the oldest request in the window expires.
+              required: true
+              schema:
+                type: integer
+            Retry-After:
+              description: Seconds to wait before retrying. Equal to RateLimit-Reset.
+              required: true
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+components:
+  schemas:
+    Agent:
+      properties:
+        name:
+          type: string
+          title: Name
+        title:
+          type: string
+          title: Title
+        status:
+          type: string
+          title: Status
+      type: object
+      required:
+      - name
+      - title
+      - status
+      title: Agent
+    AgentPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/Agent'
+          type: array
+          title: Data
+        next_cursor:
+          title: Next Cursor
+          type:
+          - string
+          - 'null'
+        limit:
+          type: integer
+          title: Limit
+      type: object
+      required:
+      - data
+      - limit
+      title: AgentPage
+      description: next_cursor is JSON null when there is no next page. The key is
+        sent. It may also be omitted.
+    CreateRunRequest:
+      properties:
+        task_type:
+          type: string
+          const: code_review
+          title: Task Type
+        input:
+          $ref: '#/components/schemas/RunInput'
+        client_ref:
+          title: Client Ref
+          maxLength: 200
+          type:
+          - string
+          - 'null'
+      additionalProperties: false
+      type: object
+      required:
+      - task_type
+      - input
+      title: CreateRunRequest
+    CreateRunResponse:
+      properties:
+        run_id:
+          type: string
+          title: Run Id
+        status:
+          type: string
+          enum:
+          - queued
+          - running
+          - succeeded
+          - failed
+          title: Status
+      type: object
+      required:
+      - run_id
+      - status
+      title: CreateRunResponse
+    EpisodeResponse:
+      properties:
+        episode_id:
+          type: string
+          title: Episode Id
+        source:
+          type: string
+          title: Source
+        inputs:
+          additionalProperties: true
+          type: object
+          title: Inputs
+        plan:
+          additionalProperties: true
+          type: object
+          title: Plan
+        tool_calls:
+          items: {}
+          type: array
+          title: Tool Calls
+        model_choices:
+          items: {}
+          type: array
+          title: Model Choices
+        outputs:
+          additionalProperties: true
+          type: object
+          title: Outputs
+        cost:
+          additionalProperties: true
+          type: object
+          title: Cost
+        latency_ms:
+          type: integer
+          title: Latency Ms
+        outcome:
+          type: string
+          title: Outcome
+        quality_score:
+          type: number
+          title: Quality Score
+        trace:
+          items: {}
+          type: array
+          title: Trace
+      type: object
+      required:
+      - episode_id
+      - source
+      - inputs
+      - plan
+      - tool_calls
+      - model_choices
+      - outputs
+      - cost
+      - latency_ms
+      - outcome
+      - quality_score
+      - trace
+      title: EpisodeResponse
+    HealthResponse:
+      properties:
+        status:
+          type: string
+          const: ok
+          title: Status
+      type: object
+      required:
+      - status
+      title: HealthResponse
+    RunInput:
+      properties:
+        diff:
+          type: string
+          minLength: 1
+          title: Diff
+          description: Unified diff to review.
+        repo:
+          type: string
+          title: Repo
+          default: local
+        instructions:
+          type: string
+          title: Instructions
+          default: Review this diff.
+      additionalProperties: false
+      type: object
+      required:
+      - diff
+      title: RunInput
+    RunStatusResponse:
+      properties:
+        run_id:
+          type: string
+          title: Run Id
+        status:
+          type: string
+          enum:
+          - queued
+          - running
+          - succeeded
+          - failed
+          title: Status
+        task_type:
+          type: string
+          title: Task Type
+        result:
+          title: Result
+          additionalProperties: true
+          type:
+          - object
+          - 'null'
+        episode_id:
+          title: Episode Id
+          type:
+          - string
+          - 'null'
+        client_ref:
+          title: Client Ref
+          type:
+          - string
+          - 'null'
+        error:
+          title: Error
+          type:
+          - string
+          - 'null'
+      type: object
+      required:
+      - run_id
+      - status
+      - task_type
+      title: RunStatusResponse
+      description: 'Nullable fields are sent as JSON null and may also be omitted.
+
+
+        result, episode_id, client_ref, and error use type [value, "null"] and are
+        not required.'
+    Error:
+      type: object
+      title: Error
+      description: Every 4xx and 5xx body. details is omitted except on validation_error.
+      additionalProperties: false
+      required:
+      - error
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required:
+          - code
+          - message
+          - request_id
+          properties:
+            code:
+              type: string
+              title: Code
+            message:
+              type: string
+              title: Message
+            request_id:
+              type: string
+              title: Request Id
+            details:
+              type: array
+              title: Details
+              description: Field issues. Omitted when the failure is not a validation
+                error.
+              items:
+                type: object
+                additionalProperties: false
+                required:
+                - field
+                - issue
+                properties:
+                  field:
+                    type: string
+                    title: Field
+                  issue:
+                    type: string
+                    title: Issue
+    RunStartedData:
+      type: object
+      title: RunStartedData
+      description: Payload for event run.started.
+      additionalProperties: false
+      required:
+      - run_id
+      - task_type
+      - at
+      properties:
+        run_id:
+          type: string
+          title: Run Id
+        task_type:
+          type: string
+          title: Task Type
+        at:
+          type: string
+          title: At
+          description: UTC timestamp.
+    NodeStartedData:
+      type: object
+      title: NodeStartedData
+      description: Payload for event node.started.
+      additionalProperties: false
+      required:
+      - node
+      - at
+      properties:
+        node:
+          type: string
+          title: Node
+        at:
+          type: string
+          title: At
+          description: UTC timestamp.
+    NodeCompletedData:
+      type: object
+      title: NodeCompletedData
+      description: Payload for event node.completed.
+      additionalProperties: false
+      required:
+      - node
+      - status
+      - at
+      properties:
+        node:
+          type: string
+          title: Node
+        status:
+          type: string
+          enum:
+          - completed
+          title: Status
+        at:
+          type: string
+          title: At
+          description: UTC timestamp.
+    RunCompletedData:
+      type: object
+      title: RunCompletedData
+      description: Payload for event run.completed. episode_id is null only if the
+        writer did not persist a row.
+      additionalProperties: false
+      properties:
+        run_id:
+          type: string
+          title: Run Id
+        status:
+          type: string
+          enum:
+          - succeeded
+          title: Status
+        episode_id:
+          type:
+          - string
+          - 'null'
+          title: Episode Id
+          description: Present as a string when the episode row exists. JSON null
+            when it does not. The key is sent either way.
+        at:
+          type: string
+          title: At
+          description: UTC timestamp.
+      required:
+      - run_id
+      - status
+      - at
+    RunFailedData:
+      type: object
+      title: RunFailedData
+      description: Payload for event run.failed.
+      additionalProperties: false
+      properties:
+        run_id:
+          type: string
+          title: Run Id
+        status:
+          type: string
+          enum:
+          - failed
+          title: Status
+        episode_id:
+          type:
+          - string
+          - 'null'
+          title: Episode Id
+          description: String when an episode row was still written. JSON null when
+            the run failed before the writer. The key is sent either way.
+        error:
+          type:
+          - string
+          - 'null'
+          title: Error
+          description: Failure message. JSON null when there is no message. The key
+            is sent either way.
+        at:
+          type: string
+          title: At
+          description: UTC timestamp.
+      required:
+      - run_id
+      - status
+      - at
+    RunEvent:
+      type: object
+      title: RunEvent
+      description: One stored frame. The HTTP body is text/event-stream, not a JSON
+        array of these objects.
+      additionalProperties: false
+      required:
+      - id
+      - event
+      - data
+      properties:
+        id:
+          type: integer
+          minimum: 1
+          title: Id
+        event:
+          type: string
+          enum:
+          - run.started
+          - node.started
+          - node.completed
+          - run.completed
+          - run.failed
+          title: Event
+        data:
+          title: Data
+          description: 'JSON object for the event name: RunStartedData, NodeStartedData,
+            NodeCompletedData, RunCompletedData, or RunFailedData.'
+          type: object
+          additionalProperties: true
+  securitySchemes:
+    HTTPBearer:
+      type: http
+      description: Bearer API key scoped to a client such as ios-dev.
+      scheme: bearer

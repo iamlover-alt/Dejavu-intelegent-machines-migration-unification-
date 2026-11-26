@@ -1,0 +1,28 @@
+# Deploy config only. Nothing in this repository deploys the gateway.
+# Replace `app` with a name that is free on Fly.io before any deploy.
+
+app = "dejavu-midplane-gateway"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval = "15s"
+    method = "GET"
+    path = "/healthz"
+    timeout = "2s"
+
+[env]
+  MIDPLANE_MODEL_PROVIDER = "fake"
+  MIDPLANE_SEED_DEV_KEY = "0"
+  MIDPLANE_HOST = "0.0.0.0"
+  MIDPLANE_PORT = "8000"
