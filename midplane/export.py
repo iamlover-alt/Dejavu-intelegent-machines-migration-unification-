@@ -19,7 +19,7 @@ import json
 import sys
 from pathlib import Path
 
-from midplane.prompts import render_code_review_prompt
+from midplane.prompts import render_code_review_prompt, render_schema_agent_prompt
 from midplane.store import Episode, open_store
 
 SOURCES = ("dev_guild", "trading", "app")
@@ -27,11 +27,17 @@ SOURCES = ("dev_guild", "trading", "app")
 
 def training_record(episode: Episode) -> dict:
     inputs = episode.inputs or {}
-    prompt = render_code_review_prompt(
-        repo=str(inputs.get("repo", "")),
-        instructions=str(inputs.get("instructions", "")),
-        diff=str(inputs.get("diff", "")),
-    )
+    if inputs.get("role") == "schema_agent" or inputs.get("agent") == "schema_agent":
+        prompt = render_schema_agent_prompt(
+            goal=str(inputs.get("goal") or inputs.get("instructions") or ""),
+            constraints=inputs.get("constraints") if isinstance(inputs.get("constraints"), dict) else {},
+        )
+    else:
+        prompt = render_code_review_prompt(
+            repo=str(inputs.get("repo", "")),
+            instructions=str(inputs.get("instructions", "")),
+            diff=str(inputs.get("diff", "")),
+        )
     assistant = json.dumps(episode.outputs, sort_keys=True, separators=(",", ":"))
     model_choice = next(
         (

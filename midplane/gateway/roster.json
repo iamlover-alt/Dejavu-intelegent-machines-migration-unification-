@@ -8,5 +8,6 @@
   {"name": "neutral-ops", "title": "Neutral Ops", "status": "active"},
   {"name": "platform-architect", "title": "Platform Architect", "status": "active"},
   {"name": "ghost-engineer", "title": "Ghost Engineer", "status": "active"},
-  {"name": "ios-studio", "title": "iOS Studio", "status": "active"}
+  {"name": "ios-studio", "title": "iOS Studio", "status": "active"},
+  {"name": "schema-agent", "title": "Schema Agent", "status": "active"}
 ]
