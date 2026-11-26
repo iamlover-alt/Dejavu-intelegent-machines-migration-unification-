@@ -37,6 +37,15 @@ info:
     JWT from this gateway. Bearer API keys stay available for service clients.
 
 
+    `POST /v1/retrieve` searches episode memory, schema and connector documents, or
+    decision traces.
+
+    Episode and trace hits are limited to the API key''s client. A chain spec hops
+    across those stores inside this process.
+
+    The endpoint does not call a model.
+
+
     This contract has no trading endpoints.'
   version: 0.1.0
 servers:
@@ -1243,6 +1252,175 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /v1/retrieve:
+    post:
+      tags:
+      - retrieval
+      summary: Retrieve
+      description: 'Search episode memory, schema and connectors, or decision traces.
+
+
+        Episodes and traces are limited to this API key''s client. Schema documents
+        are shared.
+
+        The chain spec does not call a model. There is no trading side effect.'
+      operationId: retrieve_v1_retrieve_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RetrieveRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RetrieveResponse'
+          headers:
+            X-Request-ID:
+              description: Echo of the request id, or a server-generated id.
+              required: true
+              schema:
+                type: string
+            RateLimit-Limit:
+              description: Maximum authenticated requests in the current window.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests left in the current window after this response.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the oldest request in the window expires.
+              required: true
+              schema:
+                type: integer
+        '422':
+          description: The request body or parameters failed validation.
+          headers:
+            X-Request-ID:
+              description: Echo of the request id, or a server-generated id.
+              required: true
+              schema:
+                type: string
+            RateLimit-Limit:
+              description: Maximum authenticated requests in the current window.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests left in the current window after this response.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the oldest request in the window expires.
+              required: true
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: The server failed while handling the request.
+          headers:
+            X-Request-ID:
+              description: Echo of the request id, or a server-generated id.
+              required: true
+              schema:
+                type: string
+            RateLimit-Limit:
+              description: Maximum authenticated requests in the current window.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests left in the current window after this response.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the oldest request in the window expires.
+              required: true
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: The bearer API key is missing, unknown, or revoked.
+          headers:
+            X-Request-ID:
+              description: Echo of the request id, or a server-generated id.
+              required: true
+              schema:
+                type: string
+            RateLimit-Limit:
+              description: Maximum authenticated requests in the current window.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests left in the current window after this response.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the oldest request in the window expires.
+              required: true
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: The API key exceeded its request window.
+          headers:
+            X-Request-ID:
+              description: Echo of the request id, or a server-generated id.
+              required: true
+              schema:
+                type: string
+            RateLimit-Limit:
+              description: Maximum authenticated requests in the current window.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests left in the current window after this response.
+              required: true
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the oldest request in the window expires.
+              required: true
+              schema:
+                type: integer
+            Retry-After:
+              description: Seconds to wait before retrying. Equal to RateLimit-Reset.
+              required: true
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: X-Request-ID
+        in: header
+        required: false
+        description: Optional caller-supplied id. The response echoes it. The server
+          generates one when the header is omitted.
+        schema: *id001
 components:
   schemas:
     Agent:
@@ -1284,6 +1462,44 @@ components:
       title: AgentPage
       description: next_cursor is JSON null when there is no next page. The key is
         sent. It may also be omitted.
+    ChainStepRequest:
+      properties:
+        store:
+          type: string
+          enum:
+          - episodes
+          - schema
+          - traces
+          title: Store
+        query:
+          title: Query
+          type:
+          - string
+          - 'null'
+        filters:
+          title: Filters
+          additionalProperties: true
+          type:
+          - object
+          - 'null'
+        top_k:
+          title: Top K
+          maximum: 50.0
+          minimum: 1.0
+          type:
+          - integer
+          - 'null'
+        use_previous:
+          type: boolean
+          title: Use Previous
+          default: false
+      additionalProperties: false
+      type: object
+      required:
+      - store
+      title: ChainStepRequest
+      description: One hop. ``query`` defaults to the request query. ``use_previous``
+        appends the prior hit's name.
     CreateRunRequest:
       properties:
         task_type:
@@ -1455,6 +1671,145 @@ components:
       required:
       - status
       title: HealthResponse
+    HopModel:
+      properties:
+        hop:
+          type: integer
+          title: Hop
+        store:
+          type: string
+          title: Store
+        query:
+          type: string
+          title: Query
+        filters:
+          additionalProperties: true
+          type: object
+          title: Filters
+        doc_ids:
+          items:
+            type: string
+          type: array
+          title: Doc Ids
+        dropped_duplicates:
+          items:
+            type: string
+          type: array
+          title: Dropped Duplicates
+        model_rewritten:
+          type: boolean
+          title: Model Rewritten
+      type: object
+      required:
+      - hop
+      - store
+      - query
+      - filters
+      - doc_ids
+      - dropped_duplicates
+      - model_rewritten
+      title: HopModel
+    RetrievalHitModel:
+      properties:
+        doc_id:
+          type: string
+          title: Doc Id
+        store:
+          type: string
+          title: Store
+        text:
+          type: string
+          title: Text
+        score:
+          type: number
+          title: Score
+        fusion_score:
+          title: Fusion Score
+          type:
+          - number
+          - 'null'
+        metadata:
+          additionalProperties: true
+          type: object
+          title: Metadata
+        breakdown:
+          $ref: '#/components/schemas/ScoreBreakdownModel'
+      type: object
+      required:
+      - doc_id
+      - store
+      - text
+      - score
+      - metadata
+      - breakdown
+      title: RetrievalHitModel
+      description: fusion_score is JSON null unless this hit came from a multi-hop
+        chain.
+    RetrieveRequest:
+      properties:
+        store:
+          type: string
+          enum:
+          - episodes
+          - schema
+          - traces
+          - chain
+          title: Store
+        query:
+          type: string
+          maxLength: 4000
+          minLength: 1
+          title: Query
+        filters:
+          title: Filters
+          additionalProperties: true
+          type:
+          - object
+          - 'null'
+        top_k:
+          type: integer
+          maximum: 50.0
+          minimum: 1.0
+          title: Top K
+          default: 5
+        chain:
+          title: Chain
+          items:
+            $ref: '#/components/schemas/ChainStepRequest'
+          type:
+          - array
+          - 'null'
+      additionalProperties: false
+      type: object
+      required:
+      - store
+      - query
+      title: RetrieveRequest
+    RetrieveResponse:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/RetrievalHitModel'
+          type: array
+          title: Data
+        hops:
+          items:
+            $ref: '#/components/schemas/HopModel'
+          type: array
+          title: Hops
+        fused:
+          type: boolean
+          title: Fused
+        truncated:
+          type: boolean
+          title: Truncated
+      type: object
+      required:
+      - data
+      - hops
+      - fused
+      - truncated
+      title: RetrieveResponse
     RunInput:
       properties:
         diff:
@@ -1523,6 +1878,56 @@ components:
 
         result, episode_id, client_ref, and error use type [value, "null"] and are
         not required.'
+    ScoreBreakdownModel:
+      properties:
+        knn:
+          type: number
+          title: Knn
+        lexical:
+          type: number
+          title: Lexical
+        field_match:
+          type: number
+          title: Field Match
+        prior:
+          type: number
+          title: Prior
+        rerank:
+          type: number
+          title: Rerank
+        final:
+          type: number
+          title: Final
+        warning:
+          title: Warning
+          type:
+          - string
+          - 'null'
+        weights:
+          additionalProperties: true
+          type: object
+          title: Weights
+        terms:
+          additionalProperties: true
+          type: object
+          title: Terms
+        reranker:
+          type: string
+          title: Reranker
+      type: object
+      required:
+      - knn
+      - lexical
+      - field_match
+      - prior
+      - rerank
+      - final
+      - weights
+      - terms
+      - reranker
+      title: ScoreBreakdownModel
+      description: warning is JSON null when the hit is not a failure or a planned
+        connector.
     Error:
       type: object
       title: Error

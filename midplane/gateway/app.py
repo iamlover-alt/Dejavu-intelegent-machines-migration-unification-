@@ -29,6 +29,9 @@ from midplane.gateway.keys import hash_token, pepper_from_env
 from midplane.gateway.limiter import RateLimiter
 from midplane.gateway.store import GatewayStore, KeyRecord, RunRecord, utc_now
 from midplane.graph import stream_review
+from midplane.retrieval.chain import ChainStep, HopTrace
+from midplane.retrieval.service import RetrievalService
+from midplane.retrieval.types import FilterError, RetrievalResult, validate_filters
 from midplane.store import EpisodeStore, InvalidEpisodeCursor, open_store, resolve_database_url
 
 logger = logging.getLogger(__name__)
@@ -48,6 +51,10 @@ Pagination: list bodies are `{"data": [...], "next_cursor": string | null, "limi
 Rate limiting v0 is per API key inside a single process. Authenticated responses include `RateLimit-Limit`, `RateLimit-Remaining`, and `RateLimit-Reset` (seconds until the window moves). Over the limit, the status is 429, the code is `rate_limited`, and the response also includes `Retry-After`.
 
 Auth v1 is not built. The planned path is Sign in with Apple, then a short-lived JWT from this gateway. Bearer API keys stay available for service clients.
+
+`POST /v1/retrieve` searches episode memory, schema and connector documents, or decision traces.
+Episode and trace hits are limited to the API key's client. A chain spec hops across those stores inside this process.
+The endpoint does not call a model.
 
 This contract has no trading endpoints.
 """.strip()
@@ -140,6 +147,70 @@ class AgentPage(BaseModel):
 
 class HealthResponse(BaseModel):
     status: Literal["ok"]
+
+
+class ChainStepRequest(BaseModel):
+    """One hop. ``query`` defaults to the request query. ``use_previous`` appends the prior hit's name."""
+
+    model_config = ConfigDict(extra="forbid")
+    store: Literal["episodes", "schema", "traces"]
+    query: str | None = None
+    filters: dict | None = None
+    top_k: int | None = Field(default=None, ge=1, le=50)
+    use_previous: bool = False
+
+
+class RetrieveRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    store: Literal["episodes", "schema", "traces", "chain"]
+    query: str = Field(min_length=1, max_length=4000)
+    filters: dict | None = None
+    top_k: int = Field(default=5, ge=1, le=50)
+    chain: list[ChainStepRequest] | None = None
+
+
+class ScoreBreakdownModel(BaseModel):
+    """warning is JSON null when the hit is not a failure or a planned connector."""
+
+    knn: float
+    lexical: float
+    field_match: float
+    prior: float
+    rerank: float
+    final: float
+    warning: str | None = None
+    weights: dict
+    terms: dict
+    reranker: str
+
+
+class RetrievalHitModel(BaseModel):
+    """fusion_score is JSON null unless this hit came from a multi-hop chain."""
+
+    doc_id: str
+    store: str
+    text: str
+    score: float
+    fusion_score: float | None = None
+    metadata: dict
+    breakdown: ScoreBreakdownModel
+
+
+class HopModel(BaseModel):
+    hop: int
+    store: str
+    query: str
+    filters: dict
+    doc_ids: list[str]
+    dropped_duplicates: list[str]
+    model_rewritten: bool
+
+
+class RetrieveResponse(BaseModel):
+    data: list[RetrievalHitModel]
+    hops: list[HopModel]
+    fused: bool
+    truncated: bool
 
 
 def load_roster() -> list[dict]:
@@ -241,6 +312,7 @@ def create_app(
     key_pepper = pepper if pepper is not None else pepper_from_env()
     gateway = GatewayStore(url)
     episodes = episode_store if episode_store is not None else open_store(url)
+    retrieval = RetrievalService(url, episodes)
     limiter = RateLimiter(limit)
     roster = load_roster()
 
@@ -253,6 +325,7 @@ def create_app(
     )
     app.state.gateway = gateway
     app.state.episodes = episodes
+    app.state.retrieval = retrieval
     app.state.limiter = limiter
     app.state.pepper = key_pepper
 
@@ -561,4 +634,135 @@ def create_app(
             limit=limit,
         )
 
+    @app.post("/v1/retrieve", response_model=RetrieveResponse, tags=["retrieval"])
+    def retrieve(body: RetrieveRequest, key: KeyRecord = Depends(require_key)) -> RetrieveResponse:
+        """Search episode memory, schema and connectors, or decision traces.
+
+        Episodes and traces are limited to this API key's client. Schema documents are shared.
+        The chain spec does not call a model. There is no trading side effect.
+        """
+
+        if body.store == "chain" and not body.chain:
+            raise APIError(422, "validation_error", "chain: required when store is chain")
+        if body.store != "chain" and body.chain is not None:
+            raise APIError(422, "validation_error", "chain: only valid when store is chain")
+        owned = gateway.episode_ids_for_client(key.client_id)
+        try:
+            if body.store == "chain":
+                steps = [
+                    ChainStep(
+                        store=step.store,
+                        query=step.query,
+                        filters=_scope_filters(step.store, _merge_filters(body.filters, step.filters), owned),
+                        top_k=step.top_k or body.top_k,
+                        use_previous=step.use_previous,
+                    )
+                    for step in body.chain or []
+                ]
+                with retrieval.memory.guard():
+                    if any(step.store == "episodes" for step in steps):
+                        retrieval.memory.reindex(episodes)
+                    result = retrieval.chain.run(body.query, steps)
+                return _retrieve_response(
+                    result.hits,
+                    result.hops,
+                    fused=result.fused,
+                    truncated=result.truncated,
+                )
+            filters = _scope_filters(body.store, body.filters, owned)
+            with retrieval.memory.guard():
+                if body.store == "episodes":
+                    retrieval.memory.reindex(episodes)
+                hits = _store_for(retrieval, body.store).retrieve(body.query, top_k=body.top_k, filters=filters)
+            hop = HopTrace(
+                hop=0,
+                store=body.store,
+                query=body.query,
+                filters=filters,
+                doc_ids=[hit.doc_id for hit in hits],
+                dropped_duplicates=[],
+                model_rewritten=False,
+            )
+            return _retrieve_response(hits, [hop], fused=False, truncated=False)
+        except (FilterError, ValueError) as exc:
+            raise APIError(422, "validation_error", str(exc)) from exc
+
     return app
+
+
+def _merge_filters(base: dict | None, step: dict | None) -> dict:
+    merged = dict(base or {})
+    merged.update(step or {})
+    return merged
+
+
+def _scope_filters(store_name: str, filters: dict | None, owned_ids: list[str]) -> dict:
+    """Episode and trace filters cannot name another client's run ids."""
+
+    try:
+        cleaned = validate_filters(filters)
+    except FilterError as exc:
+        raise APIError(422, "validation_error", str(exc)) from exc
+    if store_name in {"episodes", "traces"}:
+        allowed = set(owned_ids)
+        if "run_ids" in cleaned:
+            allowed &= set(cleaned["run_ids"])
+        cleaned["run_ids"] = sorted(allowed)
+    else:
+        cleaned.pop("run_ids", None)
+    return cleaned
+
+
+def _store_for(retrieval: RetrievalService, name: str):
+    stores = {
+        "episodes": retrieval.memory,
+        "schema": retrieval.schema,
+        "traces": retrieval.traces,
+    }
+    try:
+        return stores[name]
+    except KeyError as exc:
+        raise APIError(422, "validation_error", f"Unknown retrieval store: {name}") from exc
+
+
+def _retrieve_response(
+    hits: list[RetrievalResult],
+    hops: list[HopTrace],
+    *,
+    fused: bool,
+    truncated: bool,
+) -> RetrieveResponse:
+    return RetrieveResponse(
+        data=[_hit_model(hit) for hit in hits],
+        hops=[
+            HopModel(
+                hop=hop.hop,
+                store=hop.store,
+                query=hop.query,
+                filters=dict(hop.filters),
+                doc_ids=list(hop.doc_ids),
+                dropped_duplicates=list(hop.dropped_duplicates),
+                model_rewritten=hop.model_rewritten,
+            )
+            for hop in hops
+        ],
+        fused=fused,
+        truncated=truncated,
+    )
+
+
+def _hit_model(hit: RetrievalResult) -> RetrievalHitModel:
+    text = hit.text
+    metadata = dict(hit.metadata)
+    if len(text) > 2000:
+        text = text[:2000]
+        metadata["text_truncated"] = True
+    return RetrievalHitModel(
+        doc_id=hit.doc_id,
+        store=hit.store,
+        text=text,
+        score=hit.score,
+        fusion_score=hit.fusion_score,
+        metadata=metadata,
+        breakdown=ScoreBreakdownModel(**hit.breakdown.as_dict()),
+    )

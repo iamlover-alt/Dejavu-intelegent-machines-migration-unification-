@@ -23,6 +23,7 @@ def gateway_app(tmp_path):
     yield app
     app.state.gateway.close()
     app.state.episodes.close()
+    app.state.retrieval.close()
 
 
 @pytest.fixture
@@ -330,6 +331,7 @@ def test_rate_limit(tmp_path):
     assert "ratelimit-limit" not in {name.lower() for name in allowed.headers}
     app.state.gateway.close()
     app.state.episodes.close()
+    app.state.retrieval.close()
 
 
 def test_trading_paths_are_absent(client: TestClient, gateway_app):
@@ -349,6 +351,7 @@ def test_openapi_has_no_trading_paths(gateway_app):
         "/v1/episodes",
         "/v1/episodes/{episode_id}",
         "/v1/agents",
+        "/v1/retrieve",
     }
     assert all("broker" not in path and "trading" not in path for path in paths)
 

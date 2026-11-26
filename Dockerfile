@@ -5,6 +5,7 @@ WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY midplane ./midplane
 COPY migrations ./migrations
+COPY openapi ./openapi
 
 RUN pip install --no-cache-dir ".[postgres]"
 

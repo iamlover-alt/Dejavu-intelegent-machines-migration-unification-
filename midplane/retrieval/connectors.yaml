@@ -1,0 +1,78 @@
+# Connector metadata for SchemaConnectorStore.
+# status: wired means this repository has the client or the route.
+# status: planned means a schema agent can name it, and nothing here calls it.
+# real_money is false on every row. Trading stays paper-only.
+# RECONCILE with integration_guide.md if connector names already exist there.
+connectors:
+  - name: episode-store
+    title: EpisodeStore
+    status: wired
+    paper_only: false
+    real_money: false
+    summary: >
+      Durable episodes in SQLite or Postgres. The store upserts one row per run,
+      lists by source, score, and time, and exports JSONL.
+  - name: gateway-rest-sse
+    title: Gateway REST and SSE
+    status: wired
+    paper_only: false
+    real_money: false
+    summary: >
+      FastAPI gateway. Bearer API keys, code-review runs, SSE node events,
+      episode reads, the agent roster, and POST /v1/retrieve.
+  - name: github
+    title: GitHub
+    status: planned
+    paper_only: false
+    real_money: false
+    summary: Planned connector for repositories, pull requests, and checks. Not wired in this package.
+  - name: llm-providers
+    title: LLM providers
+    status: wired
+    paper_only: false
+    real_money: false
+    summary: >
+      ModelProvider with a deterministic fake provider for tests and the default CLI.
+      OpenAI-compatible and Anthropic adapters exist and are not called unless
+      MIDPLANE_MODEL_PROVIDER is set. This retrieval layer does not call them.
+  - name: trading-control
+    title: Trading control service
+    status: wired
+    paper_only: true
+    real_money: false
+    summary: >
+      In-process paper-only trading control client. real_money is false.
+      Non-paper actions are refused. broker_called stays false. There is no
+      trading HTTP endpoint and no broker credential.
+  - name: gmail
+    title: Gmail
+    status: planned
+    paper_only: false
+    real_money: false
+    summary: Planned mail connector. Not wired in this package.
+  - name: calendar
+    title: Calendar
+    status: planned
+    paper_only: false
+    real_money: false
+    summary: Planned calendar connector. Not wired in this package.
+  - name: drive
+    title: Drive
+    status: planned
+    paper_only: false
+    real_money: false
+    summary: Planned Drive connector. Not wired in this package.
+  - name: x
+    title: X
+    status: planned
+    paper_only: false
+    real_money: false
+    summary: Planned X connector for posts and users. Not wired in this package.
+  - name: ios-swift-client
+    title: iOS Swift client
+    status: wired
+    paper_only: false
+    real_money: false
+    summary: >
+      Generated Swift client in clients/swift, built from openapi/midplane-v0.yaml
+      and compiled in CI.

@@ -312,6 +312,7 @@ class PostgresEpisodeStore:
             raise RuntimeError(
                 "Postgres episodes require the postgres extra: pip install 'midplane[postgres]'"
             ) from exc
+        self.dsn = dsn
         self._conn = psycopg.connect(dsn)
         for script in (POSTGRES_EPISODES_DDL, POSTGRES_EPISODE_INDEX_DDL):
             for statement in script.split(";"):

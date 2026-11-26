@@ -1,6 +1,7 @@
 services:
   db:
-    image: postgres:16.6
+    # pgvector is required by migrations/004_retrieval.sql (create extension vector).
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: midplane
       POSTGRES_PASSWORD: midplane

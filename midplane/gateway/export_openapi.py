@@ -22,6 +22,9 @@ def schema_dict(database_url: str = "sqlite:///midplane_openapi.sqlite") -> dict
         closer = getattr(app.state.episodes, "close", None)
         if closer is not None:
             closer()
+        retrieval = getattr(app.state, "retrieval", None)
+        if retrieval is not None:
+            retrieval.close()
 
 
 def main() -> int:
