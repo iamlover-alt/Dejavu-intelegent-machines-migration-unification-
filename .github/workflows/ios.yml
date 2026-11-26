@@ -1,0 +1,40 @@
+name: iOS
+
+on:
+  pull_request:
+    paths:
+      - "ios/**"
+      - "clients/swift/**"
+      - "openapi/midplane-v0.yaml"
+      - ".github/workflows/ios.yml"
+  push:
+    branches: [main]
+    paths:
+      - "ios/**"
+      - "clients/swift/**"
+      - "openapi/midplane-v0.yaml"
+      - ".github/workflows/ios.yml"
+
+jobs:
+  build-and-test:
+    name: Build and test
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Test MidplaneKit
+        run: swift test --package-path ios
+
+      - name: Build the iOS app
+        run: |
+          # The generated client uses the OpenAPIGenerator package plugin.
+          # Xcode stops the build until that plugin is trusted; CI has no prompt.
+          defaults write com.apple.dt.Xcode IDESkipPackagePluginFingerprintValidatation -bool YES
+          xcodebuild \
+            -project ios/App/Dejavu.xcodeproj \
+            -scheme Dejavu \
+            -destination 'generic/platform=iOS Simulator' \
+            -configuration Debug \
+            -skipPackagePluginValidation \
+            CODE_SIGNING_ALLOWED=NO \
+            build
