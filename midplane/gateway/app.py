@@ -45,7 +45,7 @@ Every response carries `X-Request-ID`. Clients may send that header; otherwise t
 Pagination: list bodies are `{"data": [...], "next_cursor": string | null, "limit": integer}`.
 `limit` defaults to 50 and must be from 1 to 100. `cursor` is opaque. Send `next_cursor` back as `cursor` for the next page. An unknown cursor returns `invalid_cursor`.
 
-Rate limiting v0 is per API key inside a single process. Responses include `X-RateLimit-Limit` and `X-RateLimit-Remaining`. Over the limit, the status is 429 and the code is `rate_limited`.
+Rate limiting v0 is per API key inside a single process. Authenticated responses include `RateLimit-Limit`, `RateLimit-Remaining`, and `RateLimit-Reset` (seconds until the window moves). Over the limit, the status is 429, the code is `rate_limited`, and the response also includes `Retry-After`.
 
 Auth v1 is not built. The planned path is Sign in with Apple, then a short-lived JWT from this gateway. Bearer API keys stay available for service clients.
 
@@ -148,14 +148,22 @@ def _request_id(request: Request) -> str:
     return getattr(request.state, "request_id", "req_unknown")
 
 
+def _rate_headers(request: Request) -> dict[str, str]:
+    limit = getattr(request.state, "rate_limit", None)
+    if not limit:
+        return {}
+    return {
+        "RateLimit-Limit": str(limit),
+        "RateLimit-Remaining": str(getattr(request.state, "rate_remaining", 0)),
+        "RateLimit-Reset": str(getattr(request.state, "rate_reset", 1)),
+    }
+
+
 def _error_response(request: Request, error: APIError) -> JSONResponse:
     headers = {"X-Request-ID": _request_id(request)}
+    headers.update(_rate_headers(request))
     if error.status_code == 429:
-        headers["Retry-After"] = "60"
-        headers["X-RateLimit-Remaining"] = "0"
-        limit = getattr(request.state, "rate_limit", None)
-        if limit:
-            headers["X-RateLimit-Limit"] = str(limit)
+        headers["Retry-After"] = headers.get("RateLimit-Reset", "60")
     return JSONResponse(status_code=error.status_code, content=error.body(_request_id(request)), headers=headers)
 
 
@@ -243,10 +251,8 @@ def create_app(
         request.state.request_id = incoming.strip() if incoming and incoming.strip() else f"req_{uuid.uuid4().hex}"
         response = await call_next(request)
         response.headers["X-Request-ID"] = request.state.request_id
-        rate_limit = getattr(request.state, "rate_limit", None)
-        if rate_limit:
-            response.headers["X-RateLimit-Limit"] = str(rate_limit)
-            response.headers["X-RateLimit-Remaining"] = str(getattr(request.state, "rate_remaining", 0))
+        for name, value in _rate_headers(request).items():
+            response.headers[name] = value
         return response
 
     @app.exception_handler(APIError)
@@ -255,12 +261,16 @@ def create_app(
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request: Request, exc: RequestValidationError):
-        parts = []
+        details = []
         for item in exc.errors():
-            location = ".".join(str(piece) for piece in item.get("loc", []) if piece != "body")
-            message = item.get("msg", "Invalid request")
-            parts.append(f"{location}: {message}" if location else message)
-        return _error_response(request, APIError(422, "validation_error", "; ".join(parts) or "Invalid request."))
+            field = ".".join(str(piece) for piece in item.get("loc", []) if piece != "body") or "body"
+            issue = str(item.get("msg", "Invalid request"))
+            details.append({"field": field, "issue": issue})
+        summary = "; ".join(f"{item['field']}: {item['issue']}" for item in details) or "Invalid request."
+        return _error_response(
+            request,
+            APIError(422, "validation_error", summary, details=details or None),
+        )
 
     @app.exception_handler(StarletteHTTPException)
     async def http_error(request: Request, exc: StarletteHTTPException):
@@ -291,8 +301,9 @@ def create_app(
         if record is None:
             raise APIError(401, "unauthorized", "Missing or invalid API key.")
         request.state.rate_limit = limiter.per_minute
-        allowed, remaining = limiter.check(record.key_id)
+        allowed, remaining, reset = limiter.check(record.key_id)
         request.state.rate_remaining = remaining
+        request.state.rate_reset = reset
         if not allowed:
             raise APIError(429, "rate_limited", "Rate limit exceeded.")
         return record

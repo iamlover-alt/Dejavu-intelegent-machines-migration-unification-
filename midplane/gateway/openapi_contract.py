@@ -164,6 +164,94 @@ def rewrite_nullable(node: object) -> object:
     return {key: rewrite_nullable(value) for key, value in collapsed.items()}
 
 
+_ERROR_SCHEMA = {
+    "type": "object",
+    "title": "Error",
+    "description": "Every 4xx and 5xx body. details is omitted except on validation_error.",
+    "additionalProperties": False,
+    "required": ["error"],
+    "properties": {
+        "error": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["code", "message", "request_id"],
+            "properties": {
+                "code": {"type": "string", "title": "Code"},
+                "message": {"type": "string", "title": "Message"},
+                "request_id": {"type": "string", "title": "Request Id"},
+                "details": {
+                    "type": "array",
+                    "title": "Details",
+                    "description": "Field issues. Omitted when the failure is not a validation error.",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["field", "issue"],
+                        "properties": {
+                            "field": {"type": "string", "title": "Field"},
+                            "issue": {"type": "string", "title": "Issue"},
+                        },
+                    },
+                },
+            },
+        }
+    },
+}
+
+_REQUEST_ID_PARAMETER = {
+    "name": "X-Request-ID",
+    "in": "header",
+    "required": False,
+    "description": "Optional caller-supplied id. The response echoes it. The server generates one when the header is omitted.",
+    "schema": {"type": "string"},
+}
+
+_METHODS = {"get", "post", "put", "patch", "delete"}
+
+
+def _header(description: str, schema_type: str) -> dict:
+    return {
+        "description": description,
+        "required": True,
+        "schema": {"type": schema_type},
+    }
+
+
+def _error_response(description: str) -> dict:
+    return {
+        "description": description,
+        "headers": {
+            "X-Request-ID": _header("Echo of the request id, or a server-generated id.", "string"),
+        },
+        "content": {
+            "application/json": {
+                "schema": {"$ref": "#/components/schemas/Error"},
+            }
+        },
+    }
+
+
+def _rate_headers() -> dict:
+    return {
+        "RateLimit-Limit": _header("Maximum authenticated requests in the current window.", "integer"),
+        "RateLimit-Remaining": _header("Requests left in the current window after this response.", "integer"),
+        "RateLimit-Reset": _header("Seconds until the oldest request in the window expires.", "integer"),
+    }
+
+
+def _is_error_status(code: object) -> bool:
+    return isinstance(code, str) and len(code) == 3 and code[0] in {"4", "5"} and code[1:].isdigit()
+
+
+def _attach_headers(response: dict, *, authenticated: bool, status: str) -> None:
+    headers = response.setdefault("headers", {})
+    headers["X-Request-ID"] = _header("Echo of the request id, or a server-generated id.", "string")
+    if authenticated:
+        headers.update(_rate_headers())
+    if status == "429":
+        headers["Retry-After"] = _header("Seconds to wait before retrying. Equal to RateLimit-Reset.", "integer")
+
+
 def apply_contract(schema: dict) -> dict:
     """Return the OpenAPI document the checked-in YAML must match."""
 
@@ -172,17 +260,55 @@ def apply_contract(schema: dict) -> dict:
         return schema
     components = document.setdefault("components", {})
     schemas = components.setdefault("schemas", {})
+    schemas.pop("HTTPValidationError", None)
+    schemas.pop("ValidationError", None)
+    schemas["Error"] = _ERROR_SCHEMA
     schemas.update(event_component_schemas())
+    for path_item in document.get("paths", {}).values():
+        if not isinstance(path_item, dict):
+            continue
+        for method, operation in path_item.items():
+            if method not in _METHODS or not isinstance(operation, dict):
+                continue
+            parameters = operation.setdefault("parameters", [])
+            if not any(item.get("name") == "X-Request-ID" and item.get("in") == "header" for item in parameters):
+                parameters.append(dict(_REQUEST_ID_PARAMETER))
+            authenticated = bool(operation.get("security"))
+            responses = operation.setdefault("responses", {})
+            responses["422"] = _error_response("The request body or parameters failed validation.")
+            responses["500"] = _error_response("The server failed while handling the request.")
+            if authenticated:
+                responses["401"] = _error_response("The bearer API key is missing, unknown, or revoked.")
+                responses["429"] = _error_response("The API key exceeded its request window.")
+            for status, response in list(responses.items()):
+                if not isinstance(response, dict) or not _is_error_status(status):
+                    continue
+                response["content"] = {
+                    "application/json": {"schema": {"$ref": "#/components/schemas/Error"}}
+                }
+                _attach_headers(response, authenticated=authenticated, status=status)
+            for status, response in responses.items():
+                if isinstance(response, dict):
+                    _attach_headers(response, authenticated=authenticated, status=str(status))
     events = document.get("paths", {}).get("/v1/runs/{run_id}/events", {}).get("get")
     if isinstance(events, dict):
         events["description"] = SSE_DESCRIPTION
-        responses = events.setdefault("responses", {})
-        responses["200"] = {
-            "description": SSE_DESCRIPTION,
-            "content": {
-                "text/event-stream": {
-                    "schema": {"$ref": "#/components/schemas/RunEvent"},
-                }
-            },
+        success = events.setdefault("responses", {}).setdefault("200", {})
+        success["description"] = SSE_DESCRIPTION
+        success["content"] = {
+            "text/event-stream": {
+                "schema": {"$ref": "#/components/schemas/RunEvent"},
+            }
         }
+        _attach_headers(success, authenticated=True, status="200")
+    for path, path_item in document.get("paths", {}).items():
+        if not isinstance(path_item, dict):
+            continue
+        for method, operation in path_item.items():
+            if method not in _METHODS or not isinstance(operation, dict):
+                continue
+            if "{" in path:
+                operation.setdefault("responses", {})["404"] = _error_response("The resource was not found for this client.")
+                not_found = operation["responses"]["404"]
+                _attach_headers(not_found, authenticated=bool(operation.get("security")), status="404")
     return document

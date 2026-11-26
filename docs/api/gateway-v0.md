@@ -101,19 +101,29 @@ swift-openapi-generator 1.14 drops `anyOf` with `null`. These fields use `type: 
 
 ## Errors, request ids, pagination
 
-Every non-2xx body is:
+Every 4xx and 5xx body is the `Error` schema:
 
 ```json
 {"error": {"code": "unauthorized", "message": "Missing or invalid API key.", "request_id": "req_..."}}
 ```
 
+`details` is omitted except on `validation_error`, where it is an array of `{field, issue}` pairs. FastAPI's `HTTPValidationError` is not returned.
+
 Codes used in v0: `unauthorized`, `not_found`, `method_not_allowed`, `validation_error`, `invalid_cursor`, `rate_limited`, `internal_error`.
 
-Every response includes `X-Request-ID`. Send one to correlate a call; otherwise the server mints `req_` plus a random hex string and echoes it.
+Every operation accepts an optional `X-Request-ID` request header and echoes it on every response. If the request omits it, the server mints `req_` plus a random hex string.
 
 List responses are `{data, next_cursor, limit}`. `limit` defaults to 50 and must be from 1 to 100. `cursor` is opaque. Pass `next_cursor` back as `cursor`. A cursor that is not in the collection is `invalid_cursor`. `GET /v1/agents` is the list that uses this rule. The roster order is the order in `midplane/gateway/roster.json`.
 
-Authenticated calls are limited per key, inside one process, default 60 per minute (`MIDPLANE_RATE_LIMIT_PER_MINUTE`, `0` disables it). Responses include `X-RateLimit-Limit` and `X-RateLimit-Remaining`. The 429 body uses code `rate_limited` and sets `Retry-After: 60`. This limiter does not span multiple machines.
+Authenticated calls are limited per key, inside one process, default 60 per minute (`MIDPLANE_RATE_LIMIT_PER_MINUTE`, `0` disables the headers and the limit). When the limit is on, authenticated responses send:
+
+| Header | Meaning |
+| --- | --- |
+| `RateLimit-Limit` | Requests allowed in the current 60 second window |
+| `RateLimit-Remaining` | Requests left after this response |
+| `RateLimit-Reset` | Seconds until the oldest counted request leaves the window |
+
+A 429 also sends `Retry-After` with the same number of seconds as `RateLimit-Reset`, and the body uses code `rate_limited`. The limit does not span multiple machines.
 
 ## Auth v0 and the v1 path
 

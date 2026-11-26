@@ -10,12 +10,14 @@ class APIError(Exception):
     status_code: int
     code: str
     message: str
+    details: list[dict[str, str]] | None = None
 
     def body(self, request_id: str) -> dict:
-        return {
-            "error": {
-                "code": self.code,
-                "message": self.message,
-                "request_id": request_id,
-            }
+        error: dict = {
+            "code": self.code,
+            "message": self.message,
+            "request_id": request_id,
         }
+        if self.details:
+            error["details"] = self.details
+        return {"error": error}
