@@ -37,6 +37,68 @@ final class LiveMidplaneClientTests: XCTestCase {
         let lines = log.lines
         XCTAssertTrue(lines.contains { $0.contains("request_id=") })
         XCTAssertFalse(lines.joined().contains("secret-token"))
+        let recorded = await transport.requests
+        let sent = recorded.first?.headerFields[HTTPField.Name("X-Request-ID")!]
+        XCTAssertTrue(sent?.hasPrefix("req_") == true)
+        XCTAssertTrue(lines.contains { $0.contains("request_id=\(sent ?? "")") })
+        let rate = await client.latestRateLimit()
+        XCTAssertEqual(rate, RateLimit(limit: 60, remaining: 59, resetSeconds: 30))
+    }
+
+    func testErrorEnvelopeDetailsRetryAfterAndRequestIDEcho() async throws {
+        let transport = ScriptedTransport { request, _ in
+            let sent = request.headerFields[HTTPField.Name("X-Request-ID")!] ?? "missing"
+            if request.path == "/v1/runs" {
+                let payload = """
+                {"error":{"code":"validation_error","message":"Request failed validation.","request_id":"\(sent)","details":[{"field":"input.diff","issue":"Field required"}]}}
+                """
+                return (422, Data(payload.utf8), "application/json")
+            }
+            let payload = """
+            {"error":{"code":"rate_limited","message":"Too many requests.","request_id":"\(sent)"}}
+            """
+            return (429, Data(payload.utf8), "application/json")
+        }
+        let client = LiveMidplaneClient(
+            keyStore: InMemoryAPIKeyStore(key: "secret-token"),
+            transport: transport
+        )
+        let bare = try JSONDecoder().decode(
+            Components.Schemas.GatewayErrorEnvelope.self,
+            from: Data(#"{"error":{"code":"not_found","message":"Run not found.","request_id":"req_plain"}}"#.utf8)
+        )
+        let plain = GatewayFailure.decoded(statusCode: 404, envelope: bare)
+        XCTAssertEqual(plain.code, "not_found")
+        XCTAssertEqual(plain.requestID, "req_plain")
+        XCTAssertTrue(plain.details.isEmpty)
+
+        do {
+            _ = try await client.createRun(.init(taskType: .codeReview, input: .init(diff: "+x\n")))
+            XCTFail("expected validation")
+        } catch let failure as GatewayFailure {
+            XCTAssertEqual(failure.statusCode, 422)
+            XCTAssertEqual(failure.code, "validation_error")
+            XCTAssertEqual(failure.details, [FieldIssue(field: "input.diff", issue: "Field required")])
+            let sent = await transport.requests.first?.headerFields[HTTPField.Name("X-Request-ID")!]
+            XCTAssertEqual(failure.requestID, sent)
+            XCTAssertTrue(failure.requestID?.hasPrefix("req_") == true)
+        } catch {
+            XCTFail("unexpected error \(error)")
+        }
+
+        do {
+            _ = try await client.listAgents(limit: 4, cursor: nil)
+            XCTFail("expected rate limit")
+        } catch let failure as GatewayFailure {
+            XCTAssertEqual(failure.statusCode, 429)
+            XCTAssertEqual(failure.code, "rate_limited")
+            XCTAssertEqual(failure.retryAfterSeconds, 12)
+            XCTAssertEqual(failure.rateLimit, RateLimit(limit: 60, remaining: 59, resetSeconds: 30))
+            let sent = await transport.requests.last?.headerFields[HTTPField.Name("X-Request-ID")!]
+            XCTAssertEqual(failure.requestID, sent)
+        } catch {
+            XCTFail("unexpected error \(error)")
+        }
     }
 
     func testGetRunDecodesNullableFields() async throws {
@@ -173,7 +235,16 @@ private actor ScriptedTransport: ClientTransport {
         let (status, payload, contentType) = try handler(request, data)
         requests.append(request)
         var headers = HTTPFields()
-        headers[HTTPField.Name("X-Request-ID")!] = "req_header"
+        let requestID = request.headerFields[HTTPField.Name("X-Request-ID")!] ?? "req_header"
+        headers[HTTPField.Name("X-Request-ID")!] = requestID
+        if operationID != Operations.HealthzHealthzGet.id {
+            headers[HTTPField.Name("RateLimit-Limit")!] = "60"
+            headers[HTTPField.Name("RateLimit-Remaining")!] = "59"
+            headers[HTTPField.Name("RateLimit-Reset")!] = "30"
+        }
+        if status == 429 {
+            headers[HTTPField.Name("Retry-After")!] = "12"
+        }
         headers[.contentType] = contentType
         let response = HTTPResponse(status: .init(code: status), headerFields: headers)
         return (response, HTTPBody(payload))

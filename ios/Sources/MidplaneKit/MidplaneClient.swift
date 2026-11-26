@@ -13,4 +13,6 @@ public protocol MidplaneClient: Sendable {
     func runEvents(id: String, lastEventID: String?) async -> AsyncThrowingStream<RunStreamEvent, Error>
     func getEpisode(id: String) async throws -> Components.Schemas.EpisodeResponse
     func listAgents(limit: Int?, cursor: String?) async throws -> Components.Schemas.AgentPage
+    /// Rate-limit snapshot from the most recent authenticated response, when the server sent one.
+    func latestRateLimit() async -> RateLimit?
 }

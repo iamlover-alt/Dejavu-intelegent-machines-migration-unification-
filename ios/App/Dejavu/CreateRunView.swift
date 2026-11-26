@@ -15,7 +15,7 @@ struct CreateRunView: View {
                     .font(.subheadline)
                     .foregroundStyle(Theme.ink.opacity(0.72))
 
-                labeled("Diff") {
+                labeled("Diff", field: "diff") {
                     TextEditor(text: $state.diff)
                         .font(.caption.monospaced())
                         .frame(minHeight: 180)
@@ -28,15 +28,15 @@ struct CreateRunView: View {
                 }
                 .font(.subheadline.weight(.semibold))
 
-                labeled("Repo") {
+                labeled("Repo", field: "repo") {
                     TextField("local", text: $state.repo)
                         .textFieldStyle(.roundedBorder)
                 }
-                labeled("Instructions") {
+                labeled("Instructions", field: "instructions") {
                     TextField("Review this diff.", text: $state.instructions, axis: .vertical)
                         .textFieldStyle(.roundedBorder)
                 }
-                labeled("Client ref (optional)") {
+                labeled("Client ref (optional)", field: "client_ref") {
                     TextField("draft-1", text: $state.clientRef)
                         .textFieldStyle(.roundedBorder)
                 }
@@ -62,12 +62,17 @@ struct CreateRunView: View {
         .navigationBarTitleDisplayMode(.inline)
     }
 
-    private func labeled(_ title: String, @ViewBuilder content: () -> some View) -> some View {
+    private func labeled(_ title: String, field: String, @ViewBuilder content: () -> some View) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Theme.ink.opacity(0.6))
             content()
+            if let issue = ValidationDetails.issue(in: state.failure, matching: field) {
+                Text(issue)
+                    .font(.caption)
+                    .foregroundStyle(Theme.clay)
+            }
         }
     }
 

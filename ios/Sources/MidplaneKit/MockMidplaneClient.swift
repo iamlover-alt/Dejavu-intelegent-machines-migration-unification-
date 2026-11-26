@@ -10,6 +10,7 @@ public actor MockMidplaneClient: MidplaneClient {
     private var runs: [String: FixtureRun] = [:]
     private var episodes: [String: Components.Schemas.EpisodeResponse] = [:]
     private var requestCount = 0
+    private var rateLimit: RateLimit?
 
     public init(eventDelayNanoseconds: UInt64 = 0) {
         self.eventDelayNanoseconds = eventDelayNanoseconds
@@ -19,17 +20,23 @@ public actor MockMidplaneClient: MidplaneClient {
         Components.Schemas.HealthResponse(status: .ok)
     }
 
+    public func latestRateLimit() -> RateLimit? {
+        rateLimit
+    }
+
     public func createRun(
         _ body: Components.Schemas.CreateRunRequest
     ) async throws -> Components.Schemas.CreateRunResponse {
         let requestID = nextRequestID()
+        noteAuthenticatedCall()
         let diff = body.input.diff.trimmingCharacters(in: .whitespacesAndNewlines)
         if diff.isEmpty {
             throw GatewayFailure(
                 statusCode: 422,
                 code: "validation_error",
-                message: "input.diff: field required",
-                requestID: requestID
+                message: "Request failed validation.",
+                requestID: requestID,
+                details: [FieldIssue(field: "input.diff", issue: "Field required")]
             )
         }
         let ref = body.clientRef?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -37,8 +44,9 @@ public actor MockMidplaneClient: MidplaneClient {
             throw GatewayFailure(
                 statusCode: 422,
                 code: "validation_error",
-                message: "client_ref must be at most 200 characters.",
-                requestID: requestID
+                message: "Request failed validation.",
+                requestID: requestID,
+                details: [FieldIssue(field: "client_ref", issue: "Must be at most 200 characters.")]
             )
         }
         let runID = UUID().uuidString.lowercased()
@@ -58,6 +66,7 @@ public actor MockMidplaneClient: MidplaneClient {
 
     public func getRun(id: String) async throws -> Components.Schemas.RunStatusResponse {
         let requestID = nextRequestID()
+        noteAuthenticatedCall()
         guard let run = runs[id] else {
             throw GatewayFailure.notFound("Run not found.", requestID: requestID)
         }
@@ -66,6 +75,7 @@ public actor MockMidplaneClient: MidplaneClient {
 
     public func getEpisode(id: String) async throws -> Components.Schemas.EpisodeResponse {
         let requestID = nextRequestID()
+        noteAuthenticatedCall()
         guard let episode = episodes[id] else {
             throw GatewayFailure.notFound("Episode not found.", requestID: requestID)
         }
@@ -74,13 +84,15 @@ public actor MockMidplaneClient: MidplaneClient {
 
     public func listAgents(limit: Int?, cursor: String?) async throws -> Components.Schemas.AgentPage {
         let requestID = nextRequestID()
+        noteAuthenticatedCall()
         let pageLimit = limit ?? 50
         if pageLimit < 1 || pageLimit > 100 {
             throw GatewayFailure(
                 statusCode: 422,
                 code: "validation_error",
-                message: "limit: must be from 1 to 100",
-                requestID: requestID
+                message: "Request failed validation.",
+                requestID: requestID,
+                details: [FieldIssue(field: "limit", issue: "Must be from 1 to 100.")]
             )
         }
         let roster = Self.roster
@@ -106,6 +118,7 @@ public actor MockMidplaneClient: MidplaneClient {
 
     public func runEvents(id: String, lastEventID: String?) async -> AsyncThrowingStream<RunStreamEvent, Error> {
         let requestID = nextRequestID()
+        noteAuthenticatedCall()
         guard runs[id] != nil else {
             return AsyncThrowingStream { continuation in
                 continuation.finish(throwing: GatewayFailure.notFound("Run not found.", requestID: requestID))
@@ -179,6 +192,14 @@ public actor MockMidplaneClient: MidplaneClient {
     private func nextRequestID() -> String {
         requestCount += 1
         return String(format: "req_mock%04d", requestCount)
+    }
+
+    private func noteAuthenticatedCall() {
+        var current = rateLimit ?? RateLimit(limit: 60, remaining: 60, resetSeconds: 60)
+        if current.remaining > 0 {
+            current.remaining -= 1
+        }
+        rateLimit = current
     }
 
     private struct RosterEntry {

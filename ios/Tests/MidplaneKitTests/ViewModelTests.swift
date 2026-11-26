@@ -42,6 +42,42 @@ final class ViewModelTests: XCTestCase {
         XCTAssertFalse(runID.isEmpty)
     }
 
+    func testValidationDetailsMatchFormFieldsAndRetryAfterBlocksCreate() async {
+        let failure = GatewayFailure(
+            statusCode: 422,
+            code: "validation_error",
+            message: "Request failed validation.",
+            requestID: "req_validation",
+            details: [
+                FieldIssue(field: "input.diff", issue: "Field required"),
+                FieldIssue(field: "client_ref", issue: "Must be at most 200 characters.")
+            ]
+        )
+        XCTAssertEqual(ValidationDetails.issue(in: failure, matching: "diff"), "Field required")
+        XCTAssertEqual(ValidationDetails.issue(in: failure, matching: "client_ref"), "Must be at most 200 characters.")
+        XCTAssertNil(ValidationDetails.issue(in: failure, matching: "repo"))
+
+        let limited = GatewayFailure(
+            statusCode: 429,
+            code: "rate_limited",
+            message: "Too many requests.",
+            requestID: "req_limited",
+            retryAfterSeconds: 12,
+            rateLimit: RateLimit(limit: 60, remaining: 0, resetSeconds: 12)
+        )
+        var state = CreateRunReducer.reduce(CreateRunState.empty, .failed(limited))
+        XCTAssertNotNil(state.blockedUntil)
+        state.diff = "+print(\"ok\")\n"
+        let held = await CreateRunLoader.submit(state, client: MockMidplaneClient())
+        XCTAssertEqual(held.count, 1)
+        guard case .failed(let again) = held.first else {
+            return XCTFail("expected the retry window to hold the create")
+        }
+        XCTAssertEqual(again.code, "rate_limited")
+        XCTAssertTrue(again.message.hasPrefix("Try again in "))
+        XCTAssertEqual(again.requestID, "req_limited")
+    }
+
     func testRunDetailCollectsNodeEventsThenEpisode() async throws {
         let client = MockMidplaneClient()
         let created = try await client.createRun(

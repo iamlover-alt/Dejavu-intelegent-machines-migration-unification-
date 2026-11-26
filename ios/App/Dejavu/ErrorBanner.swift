@@ -9,6 +9,21 @@ struct ErrorBanner: View {
             Text(failure.message)
                 .font(.subheadline)
                 .foregroundStyle(Theme.clay)
+            if let retryAfter = failure.retryAfterSeconds {
+                Text("Retry after \(retryAfter)s")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Theme.clay)
+            }
+            ForEach(Array(failure.details.enumerated()), id: \.offset) { _, detail in
+                Text("\(detail.field): \(detail.issue)")
+                    .font(.caption)
+                    .foregroundStyle(Theme.clay)
+            }
+            if let rate = failure.rateLimit {
+                Text("\(rate.remaining) of \(rate.limit) requests left, resets in \(rate.resetSeconds)s")
+                    .font(.caption)
+                    .foregroundStyle(Theme.ink.opacity(0.7))
+            }
             if let requestID = failure.requestID {
                 Text("Request ID \(requestID)")
                     .font(.caption.monospaced())

@@ -22,10 +22,13 @@ struct GatewayMiddleware: ClientMiddleware {
         operationID: String,
         next: @Sendable (HTTPRequest, HTTPBody?, URL) async throws -> (HTTPResponse, HTTPBody?)
     ) async throws -> (HTTPResponse, HTTPBody?) {
-        let requestID = GatewayContext.current?.requestID ?? LiveMidplaneClient.makeRequestID()
+        let fallbackID = GatewayContext.current?.requestID ?? LiveMidplaneClient.makeRequestID()
         var request = request
         let requestIDField = HTTPField.Name("X-Request-ID")!
-        request.headerFields[requestIDField] = requestID
+        if request.headerFields[requestIDField] == nil {
+            request.headerFields[requestIDField] = fallbackID
+        }
+        let sentID = request.headerFields[requestIDField] ?? fallbackID
 
         if operationID != Operations.HealthzHealthzGet.id {
             let key = try keyStore.load()?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -34,9 +37,9 @@ struct GatewayMiddleware: ClientMiddleware {
                     statusCode: 401,
                     code: "unauthorized",
                     message: "Missing or invalid API key.",
-                    requestID: requestID
+                    requestID: sentID
                 )
-                log.log("\(operationID) failed code=unauthorized request_id=\(requestID)")
+                log.log("\(operationID) failed code=unauthorized request_id=\(sentID)")
                 throw failure
             }
             request.headerFields[.authorization] = "Bearer \(key)"
@@ -44,22 +47,8 @@ struct GatewayMiddleware: ClientMiddleware {
 
         do {
             let (response, responseBody) = try await next(request, body, baseURL)
-            let echoed = response.headerFields[requestIDField]
-            let loggedID = echoed ?? requestID
-            if response.status.code >= 400 {
-                let data = try await Data(collecting: responseBody ?? HTTPBody(), upTo: 1_000_000)
-                let failure = GatewayFailure.fromHTTP(
-                    status: response.status.code,
-                    data: data,
-                    headerRequestID: echoed,
-                    fallbackRequestID: requestID
-                )
-                log.log(
-                    "\(operationID) status=\(response.status.code) code=\(failure.code ?? "-") request_id=\(failure.requestID ?? loggedID)"
-                )
-                throw failure
-            }
-            log.log("\(operationID) status=\(response.status.code) request_id=\(loggedID)")
+            let echoed = response.headerFields[requestIDField] ?? sentID
+            log.log("\(operationID) status=\(response.status.code) request_id=\(echoed)")
             return (response, responseBody)
         } catch let failure as GatewayFailure {
             throw failure
@@ -68,9 +57,9 @@ struct GatewayMiddleware: ClientMiddleware {
                 statusCode: nil,
                 code: nil,
                 message: error.localizedDescription,
-                requestID: requestID
+                requestID: sentID
             )
-            log.log("\(operationID) failed request_id=\(requestID)")
+            log.log("\(operationID) failed request_id=\(sentID)")
             throw failure
         }
     }

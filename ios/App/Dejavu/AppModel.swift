@@ -9,6 +9,7 @@ final class AppModel: ObservableObject {
     @Published var agents: AgentsState = .empty
     @Published var recentRunIDs: [String] = []
     @Published var hasAPIKey = false
+    @Published var rateLimit: RateLimit?
 
     static let pageSize = 4
 
@@ -70,6 +71,7 @@ final class AppModel: ObservableObject {
         }
         connection = state
         await reloadAgents()
+        rateLimit = await current.latestRateLimit()
     }
 
     func reloadAgents() async {
@@ -95,6 +97,7 @@ final class AppModel: ObservableObject {
         do {
             let page = try await client().listAgents(limit: Self.pageSize, cursor: cursor)
             agents = AgentsReducer.apply(agents, page: page, appending: true)
+            rateLimit = await client().latestRateLimit()
         } catch let failure as GatewayFailure {
             agents = AgentsReducer.failed(agents, failure)
         } catch {

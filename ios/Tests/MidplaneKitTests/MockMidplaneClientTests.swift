@@ -36,12 +36,15 @@ final class MockMidplaneClientTests: XCTestCase {
         } catch let failure as GatewayFailure {
             XCTAssertEqual(failure.code, "validation_error")
             XCTAssertEqual(failure.statusCode, 422)
+            XCTAssertEqual(failure.details.map(\.field), ["input.diff"])
+            XCTAssertEqual(failure.details.map(\.issue), ["Field required"])
         }
         do {
             _ = try await client.createRun(sampleRequest(clientRef: String(repeating: "a", count: 201)))
             XCTFail("expected validation")
         } catch let failure as GatewayFailure {
             XCTAssertEqual(failure.code, "validation_error")
+            XCTAssertEqual(failure.details.map(\.field), ["client_ref"])
         }
     }
 

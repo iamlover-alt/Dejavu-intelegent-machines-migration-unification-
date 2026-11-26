@@ -23,6 +23,11 @@ struct DebugSettingsView: View {
                     Text("Default is http://localhost:8000, the port from docker compose.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    if let rate = model.rateLimit {
+                        Text("\(rate.remaining) of \(rate.limit) requests left. Resets in \(rate.resetSeconds)s.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 Section("Bearer key") {
                     SecureField("ios-dev API key", text: $draftKey)

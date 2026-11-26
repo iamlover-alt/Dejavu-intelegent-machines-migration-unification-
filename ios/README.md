@@ -12,9 +12,10 @@ The app targets iOS 17. The generated gateway package requires Swift 6.
 | `ios/App/Dejavu.xcodeproj` | SwiftUI app |
 | `clients/swift` | Generated `MidplaneGateway` client. The app depends on it as a local package. |
 | `openapi/midplane-v0.yaml` | Contract. Do not edit it from the iOS app. |
-| `ios/CONTRACT_QUESTIONS.md` | Contract details the YAML still leaves open |
 
 `MidplaneClient` is the app boundary. `LiveMidplaneClient` calls the generated client, including the `text/event-stream` body. `MockMidplaneClient` implements the same protocol with fixture data and no network. The generator returns the event stream as bytes, so the app parses frames locally and decodes `RunStartedData`, `NodeStartedData`, `NodeCompletedData`, `RunCompletedData`, and `RunFailedData`. Reconnect sends `Last-Event-ID`. An unknown id replays the whole log.
+
+Errors are `GatewayErrorEnvelope`: `error.code`, `error.message`, `error.request_id`, and `error.details` on `validation_error`. The client sends `X-Request-ID` and shows the echoed id. Authenticated responses expose `RateLimit-Limit`, `RateLimit-Remaining`, and `RateLimit-Reset`. A 429 keeps `Retry-After` and does not send another create until that wait has passed. This matches gateway `0169be4`.
 
 `clients/swift` generates its symbols as `public` so this package can import them. The OpenAPI file is unchanged.
 

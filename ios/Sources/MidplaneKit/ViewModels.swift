@@ -65,6 +65,8 @@ public struct CreateRunState: Equatable, Sendable {
     public var clientRef: String
     public var phase: Phase
     public var failure: GatewayFailure?
+    /// When set, another create is held until this time. It comes from `Retry-After`.
+    public var blockedUntil: Date?
 
     public static let empty = CreateRunState(
         diff: "",
@@ -72,8 +74,18 @@ public struct CreateRunState: Equatable, Sendable {
         instructions: "Review this diff.",
         clientRef: "",
         phase: .editing,
-        failure: nil
+        failure: nil,
+        blockedUntil: nil
     )
+}
+
+public enum ValidationDetails {
+    /// Matches `input.diff` to the form field `diff`, and an exact field name.
+    public static func issue(in failure: GatewayFailure?, matching field: String) -> String? {
+        failure?.details.first { detail in
+            detail.field == field || detail.field.hasSuffix(".\(field)")
+        }?.issue
+    }
 }
 
 public enum CreateRunAction: Equatable, Sendable {
@@ -92,6 +104,10 @@ public enum CreateRunReducer {
             state.repo = repo
             state.instructions = instructions
             state.clientRef = clientRef
+            if let until = state.blockedUntil, until > Date() {
+                break
+            }
+            state.blockedUntil = nil
             if state.phase == .failed {
                 state.phase = .editing
                 state.failure = nil
@@ -99,12 +115,19 @@ public enum CreateRunReducer {
         case .submitStarted:
             state.phase = .submitting
             state.failure = nil
+            state.blockedUntil = nil
         case .created(let runID, let status):
             state.phase = .created(runID: runID, status: status)
             state.failure = nil
+            state.blockedUntil = nil
         case .failed(let failure):
             state.phase = .failed
             state.failure = failure
+            if let seconds = failure.retryAfterSeconds, seconds > 0 {
+                state.blockedUntil = Date().addingTimeInterval(TimeInterval(seconds))
+            } else {
+                state.blockedUntil = nil
+            }
         }
         return state
     }
@@ -116,6 +139,22 @@ public enum CreateRunReducer {
 
 public enum CreateRunLoader {
     public static func submit(_ state: CreateRunState, client: any MidplaneClient) async -> [CreateRunAction] {
+        if let until = state.blockedUntil, until > Date() {
+            let seconds = max(1, Int(until.timeIntervalSinceNow.rounded(.up)))
+            return [
+                .failed(
+                    GatewayFailure(
+                        statusCode: state.failure?.statusCode ?? 429,
+                        code: state.failure?.code ?? "rate_limited",
+                        message: "Try again in \(seconds) seconds.",
+                        requestID: state.failure?.requestID,
+                        details: state.failure?.details ?? [],
+                        retryAfterSeconds: seconds,
+                        rateLimit: state.failure?.rateLimit
+                    )
+                )
+            ]
+        }
         let diff = state.diff.trimmingCharacters(in: .whitespacesAndNewlines)
         if diff.isEmpty {
             return [

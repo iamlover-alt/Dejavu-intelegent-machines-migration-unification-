@@ -1,21 +1,59 @@
 import Foundation
+import MidplaneGateway
+
+/// Requests remaining in the current authenticated window.
+public struct RateLimit: Equatable, Sendable {
+    public var limit: Int
+    public var remaining: Int
+    public var resetSeconds: Int
+
+    public init(limit: Int, remaining: Int, resetSeconds: Int) {
+        self.limit = limit
+        self.remaining = remaining
+        self.resetSeconds = resetSeconds
+    }
+}
+
+/// One field from a `validation_error` details array.
+public struct FieldIssue: Equatable, Sendable {
+    public var field: String
+    public var issue: String
+
+    public init(field: String, issue: String) {
+        self.field = field
+        self.issue = issue
+    }
+}
 
 /// A failed gateway call.
 ///
-/// Non-2xx bodies use the envelope described in the OpenAPI `info.description`:
-/// `{"error": {"code", "message", "request_id"}}`. That shape is not a component
-/// schema. See `CONTRACT_QUESTIONS.md`.
+/// Every 4xx and 5xx body is `Components.Schemas.GatewayErrorEnvelope`:
+/// `{"error": {"code", "message", "request_id", "details"?}}`.
 public struct GatewayFailure: Error, Equatable, Sendable, LocalizedError {
     public var statusCode: Int?
     public var code: String?
     public var message: String
     public var requestID: String?
+    public var details: [FieldIssue]
+    public var retryAfterSeconds: Int?
+    public var rateLimit: RateLimit?
 
-    public init(statusCode: Int?, code: String?, message: String, requestID: String?) {
+    public init(
+        statusCode: Int?,
+        code: String?,
+        message: String,
+        requestID: String?,
+        details: [FieldIssue] = [],
+        retryAfterSeconds: Int? = nil,
+        rateLimit: RateLimit? = nil
+    ) {
         self.statusCode = statusCode
         self.code = code
         self.message = message
         self.requestID = requestID
+        self.details = details
+        self.retryAfterSeconds = retryAfterSeconds
+        self.rateLimit = rateLimit
     }
 
     public var errorDescription: String? {
@@ -29,39 +67,22 @@ public struct GatewayFailure: Error, Equatable, Sendable, LocalizedError {
         GatewayFailure(statusCode: 404, code: "not_found", message: message, requestID: requestID)
     }
 
-    static func fromHTTP(
-        status: Int,
-        data: Data,
-        headerRequestID: String?,
-        fallbackRequestID: String
+    /// Maps the generated error envelope. `details` is present for `validation_error`.
+    public static func decoded(
+        statusCode: Int,
+        envelope: Components.Schemas.GatewayErrorEnvelope,
+        retryAfterSeconds: Int? = nil,
+        rateLimit: RateLimit? = nil
     ) -> GatewayFailure {
-        if let envelope = try? JSONDecoder().decode(ErrorEnvelope.self, from: data) {
-            return GatewayFailure(
-                statusCode: status,
-                code: envelope.error.code,
-                message: envelope.error.message,
-                requestID: envelope.error.requestID
-            )
-        }
-        let requestID = headerRequestID ?? fallbackRequestID
-        let fallback = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let message = (fallback?.isEmpty == false) ? fallback! : "The request failed."
-        return GatewayFailure(statusCode: status, code: nil, message: message, requestID: requestID)
+        let body = envelope.error
+        return GatewayFailure(
+            statusCode: statusCode,
+            code: body.code,
+            message: body.message,
+            requestID: body.requestId,
+            details: (body.details ?? []).map { FieldIssue(field: $0.field, issue: $0.issue) },
+            retryAfterSeconds: retryAfterSeconds,
+            rateLimit: rateLimit
+        )
     }
-}
-
-struct ErrorEnvelope: Decodable, Equatable {
-    struct Body: Decodable, Equatable {
-        var code: String
-        var message: String
-        var requestID: String
-
-        enum CodingKeys: String, CodingKey {
-            case code
-            case message
-            case requestID = "request_id"
-        }
-    }
-
-    var error: Body
 }
