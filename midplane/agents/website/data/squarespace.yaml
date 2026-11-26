@@ -1,0 +1,404 @@
+# Squarespace design knowledge for the Dev Guild website agent.
+# Plan facts follow Squarespace Help, "Choose the right Squarespace plan"
+# (updated 2026-11-25) and the public pricing page. Prices are omitted on
+# purpose: Squarespace changes them, and this file records inclusion, not cost.
+version: "2026-11-25"
+sources:
+  - title: Choose the right Squarespace plan
+    url: https://support.squarespace.com/hc/en-us/articles/206536797-Choose-the-right-Squarespace-plan
+    updated: "2026-11-25"
+  - title: Squarespace pricing
+    url: https://www.squarespace.com/pricing
+  - title: Edit your site with Fluid Engine
+    url: https://support.squarespace.com/hc/en-us/articles/6421525446541-Edit-your-site-with-Fluid-Engine
+
+billing:
+  permanent_free_website_plan: false
+  trial_days: 14
+  statement: >-
+    Squarespace has no permanent free website plan. A new site can be designed
+    during a 14-day trial. Keeping the site online on Squarespace after the
+    trial requires a paid plan: Basic, Core, Plus, or Advanced.
+  trial:
+    kind: time_limited_trial
+    permanent: false
+    days: 14
+    paid: false
+    accepts_payments: false
+    note: >-
+      The trial is not a website plan. Most editor features are available
+      during the 14 days. Trial sites cannot accept payments. The site does
+      not stay online after the trial without a paid plan.
+  plans:
+    - id: basic
+      kind: paid_website
+      paid: true
+      includes: []
+    - id: core
+      kind: paid_website
+      paid: true
+      includes: [basic]
+    - id: plus
+      kind: paid_website
+      paid: true
+      includes: [core]
+    - id: advanced
+      kind: paid_website
+      paid: true
+      includes: [plus]
+  mobile_start:
+    kind: paid_in_app
+    paid: true
+    permanent_free: false
+    note: Mobile Start is a paid in-app purchase, not a free website plan.
+  domain_dns:
+    product: Squarespace Domains
+    free_with_domain: true
+    requires_website_plan: false
+    free_website: false
+    statement: >-
+      DNS management in Squarespace Domains is free with the domain. It is not
+      a free website, and it is not a Squarespace website plan.
+
+paid_plan_ids: [basic, core, plus, advanced]
+all_paid_plans: [basic, core, plus, advanced]
+core_and_above: [core, plus, advanced]
+
+recommended_pages:
+  - id: home
+    slug: /
+  - id: about
+    slug: /about
+  - id: platform
+    slug: /platform
+  - id: contact
+    slug: /contact
+
+audit:
+  title_min: 20
+  title_max: 60
+  max_font_families: 2
+  contrast_normal: 4.5
+  contrast_large: 3.0
+  large_text_px: 24
+  mobile_hero_max_px: 40
+  mobile_hero_max_px_origin: agent
+
+layout:
+  desktop_columns: 24
+  mobile_columns: 8
+  mobile_breakpoint_px: 767
+  section_height: >-
+    Fluid Engine section height is the row count. Rows have a minimum height
+    and grow when the content wraps. Row count is the section control that can
+    differ between the desktop layout and the mobile layout.
+  spacing: >-
+    Space sections with the section padding control and the Fluid Engine
+    gutter. Keep padding consistent between sibling sections, and do not overlap
+    text and images on the mobile grid.
+
+# `free` is always false. A feature on a paid plan is not free, including when
+# the 14-day trial exposes it. DNS is `free_with_domain`, not a free website.
+features:
+  - id: section_hero
+    group: section
+    summary: Hero section built with text, image, and button blocks in Fluid Engine.
+    plans: [basic, core, plus, advanced]
+    requires_website_plan: true
+    free: false
+    available_during_trial: true
+    free_with_domain: false
+  - id: section_text
+    group: section
+    summary: Text section using the text block.
+    plans: [basic, core, plus, advanced]
+    requires_website_plan: true
+    free: false
+    available_during_trial: true
+    free_with_domain: false
+  - id: section_image
+    group: section
+    summary: Image section. Alt text is a field on the image block; it stays empty until someone fills it in.
+    plans: [basic, core, plus, advanced]
+    requires_website_plan: true
+    free: false
+    available_during_trial: true
+    free_with_domain: false
+  - id: section_gallery
+    group: section
+    summary: Gallery section. Gallery images use their description as alt text.
+    plans: [basic, core, plus, advanced]
+    requires_website_plan: true
+    free: false
+    available_during_trial: true
+    free_with_domain: false
+  - id: section_portfolio
+    group: section
+    summary: Portfolio page collection, available on every current website plan.
+    plans: [basic, core, plus, advanced]
+    requires_website_plan: true
+    free: false
+    available_during_trial: true
+    free_with_domain: false
+  - id: section_team
+    group: section
+    summary: Team section composed from image and text blocks. It is not a separate paid block.
+    plans: [basic, core, plus, advanced]
+    requires_website_plan: true
+    free: false
+    available_during_trial: true
+    free_with_domain: false
+  - id: section_faq
+    group: section
+    summary: FAQ section composed with the accordion block.
+    plans: [basic, core, plus, advanced]
+    requires_website_plan: true
+    free: false
+    available_during_trial: true
+    free_with_domain: false
+  - id: section_pricing
+    group: section
+    summary: Pricing section composed from text and button blocks. Squarespace does not make this free.
+    plans: [basic, core, plus, advanced]
+    requires_website_plan: true
+    free: false
+    available_during_trial: true
+    free_with_domain: false
+  - id: section_contact
+    group: section
+    summary: Contact section using a form block and a button.
+    plans: [basic, core, plus, advanced]
+    requires_website_plan: true
+    free: false
+    available_during_trial: true
+    free_with_domain: false
+  - id: fluid_engine_grid
+    group: layout
+    summary: >-
+      Fluid Engine on Squarespace 7.1. Desktop grid is 24 columns. Mobile grid
+      is 8 columns below 768px. Desktop and mobile block positions are separate.
+    plans: [basic, core, plus, advanced]
+    requires_website_plan: true
+    free: false
+    available_during_trial: true
+    free_with_domain: false
+  - id: section_height
+    group: layout
+    summary: Row-count section height, including a different row count on the mobile layout.
+    plans: [basic, core, plus, advanced]
+    requires_website_plan: true
+    free: false
+    available_during_trial: true
+    free_with_domain: false
+  - id: section_spacing
+    group: layout
+    summary: Section padding and the Fluid Engine gutter.
+    plans: [basic, core, plus, advanced]
+    requires_website_plan: true
+    free: false
+    available_during_trial: true
+    free_with_domain: false
+  - id: site_styles
+    group: typography
+    summary: Site styles assign one heading font and one paragraph font for the site.
+    plans: [basic, core, plus, advanced]
+    requires_website_plan: true
+    free: false
+    available_during_trial: true
+    free_with_domain: false
+  - id: color_palette
+    group: color
+    summary: Site-wide color theme in site styles. Check pairs against WCAG AA.
+    plans: [basic, core, plus, advanced]
+    requires_website_plan: true
+    free: false
+    available_during_trial: true
+    free_with_domain: false
+  - id: mobile_layout
+    group: mobile
+    summary: >-
+      Separate mobile layout on the 8-column grid. Squarespace lists a
+      mobile-optimized site on the Basic plan. The 40px hero cap is this
+      agent's readability rule, not a Squarespace limit.
+    plans: [basic, core, plus, advanced]
+    requires_website_plan: true
+    free: false
+    available_during_trial: true
+    free_with_domain: false
+  - id: seo_title
+    group: seo
+    summary: Page title in page settings. Built-in SEO is on every current website plan.
+    plans: [basic, core, plus, advanced]
+    requires_website_plan: true
+    free: false
+    available_during_trial: true
+    free_with_domain: false
+  - id: seo_description
+    group: seo
+    summary: Meta description in page settings.
+    plans: [basic, core, plus, advanced]
+    requires_website_plan: true
+    free: false
+    available_during_trial: true
+    free_with_domain: false
+  - id: seo_slug
+    group: seo
+    summary: URL slug in page settings.
+    plans: [basic, core, plus, advanced]
+    requires_website_plan: true
+    free: false
+    available_during_trial: true
+    free_with_domain: false
+  - id: seo_alt_text
+    group: seo
+    summary: Image alt text on the image block or auto-layout image.
+    plans: [basic, core, plus, advanced]
+    requires_website_plan: true
+    free: false
+    available_during_trial: true
+    free_with_domain: false
+  - id: seo_social_image
+    group: seo
+    summary: Social sharing image paired with the page title and description.
+    plans: [basic, core, plus, advanced]
+    requires_website_plan: true
+    free: false
+    available_during_trial: true
+    free_with_domain: false
+  - id: multi_page
+    group: structure
+    summary: Multiple pages. Every current website plan allows up to 1000 pages.
+    plans: [basic, core, plus, advanced]
+    requires_website_plan: true
+    free: false
+    available_during_trial: true
+    free_with_domain: false
+  - id: custom_css
+    group: code
+    summary: CSS editor and HTML, Markdown, and CSS in code blocks. Included from Basic up.
+    plans: [basic, core, plus, advanced]
+    requires_website_plan: true
+    free: false
+    available_during_trial: true
+    free_with_domain: false
+  - id: code_injection
+    group: code
+    summary: Site-wide and per-page code injection. Not on Basic.
+    plans: [core, plus, advanced]
+    requires_website_plan: true
+    free: false
+    available_during_trial: true
+    free_with_domain: false
+  - id: javascript_iframe_block
+    group: code
+    summary: JavaScript and iframe embeds in a code block. Not on Basic.
+    plans: [core, plus, advanced]
+    requires_website_plan: true
+    free: false
+    available_during_trial: true
+    free_with_domain: false
+  - id: announcement_bar
+    group: code
+    summary: Announcement bar and mobile information bar. Not on Basic.
+    plans: [core, plus, advanced]
+    requires_website_plan: true
+    free: false
+    available_during_trial: true
+    free_with_domain: false
+  - id: domain_dns
+    group: domain
+    summary: DNS record management for a domain registered with Squarespace Domains.
+    plans: []
+    requires_website_plan: false
+    free: false
+    available_during_trial: false
+    free_with_domain: true
+
+copy_limits:
+  hero:
+    heading: 60
+    body: 180
+    cta: 32
+  text:
+    heading: 80
+    body: 500
+    cta: 32
+  image:
+    heading: 60
+    body: 140
+    cta: 32
+  gallery:
+    heading: 60
+    body: 140
+    cta: 32
+  portfolio:
+    heading: 60
+    body: 220
+    cta: 32
+  team:
+    heading: 60
+    body: 220
+    cta: 32
+  faq:
+    heading: 80
+    body: 400
+    cta: 32
+  pricing:
+    heading: 40
+    body: 180
+    cta: 32
+  contact:
+    heading: 40
+    body: 220
+    cta: 32
+
+copy:
+  required_trading_phrase: paper-only
+  banned_hype:
+    - revolutionary
+    - game-changing
+    - game changing
+    - cutting-edge
+    - cutting edge
+    - world-class
+    - world class
+    - unprecedented
+    - best-in-class
+    - best in class
+    - disrupt
+    - disruptive
+    - disruption
+    - synergy
+    - seamless
+    - next-gen
+    - next gen
+    - guaranteed
+    - award-winning
+    - award winning
+    - industry-leading
+    - industry leading
+    - groundbreaking
+    - unparalleled
+    - blazing
+    - supercharge
+    - skyrocket
+    - magic
+    - effortlessly
+  banned_trading:
+    - real money
+    - real-money
+    - live trading
+    - live trade
+    - live trades
+    - funded account
+    - place a live order
+    - actual capital
+  claim_words:
+    - customer
+    - customers
+    - client
+    - clients
+    - award
+    - awards
+    - winner
+    - revenue
