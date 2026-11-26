@@ -39,8 +39,8 @@ Connection order:
 
 | Check | Points |
 | --- | --- |
-| Run completed: `outcome=success`, no error, trace contains `supervisor`, `router`, `code_review`, `episode_writer` | 0.40 |
-| Review `output.findings` has at least one finding with a detail | 0.30 |
+| Run completed: `outcome=success`, no error, trace contains `supervisor`, `router`, `episode_writer`, and either `code_review` or `schema_agent` | 0.40 |
+| Review `output.findings` has at least one finding with a detail, or schema-agent `output.strategies` has a strategy with steps | 0.30 |
 | `latency_ms` is at most 30000 | 0.15 |
 | `cost.total_usd` is at most 1.0 | 0.15 |
 
@@ -84,5 +84,6 @@ The list is scoped to the API key's client. A key cannot page another client's e
 - [Mid-plane architecture](mid-plane.md)
 - [First vertical slice](first-slice.md)
 - [Gateway API v0](../api/gateway-v0.md)
+- [Schema agent](schema-agent.md)
 - [Retrieval layer](retrieval.md)
 - [90-day tracker](../plan/90-day-tracker.md)

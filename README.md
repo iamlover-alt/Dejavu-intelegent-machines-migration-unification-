@@ -52,6 +52,7 @@ The JSONL shape is documented in [docs/architecture/episode-flywheel.md](docs/ar
 | [Gateway API v0](docs/api/gateway-v0.md) | The HTTP contract an iOS app can build against, including auth v0 and the iOS checklist |
 | [Episode flywheel v0](docs/architecture/episode-flywheel.md) | Postgres episodes, heuristic score, JSONL export, and `GET /v1/episodes` |
 | [Retrieval layer](docs/architecture/retrieval.md) | Local embedder, episode / schema / trace stores, chaining, and `POST /v1/retrieve` |
+| [Schema agent](docs/architecture/schema-agent.md) | Schema and connector registries, utilization plans, and the schema-agent worker |
 | [90-day tracker](docs/plan/90-day-tracker.md) | Placeholder milestones. Replace the rows from `dejavu_90day_plan.xlsx` |
 
 ## How to read
@@ -65,7 +66,7 @@ The JSONL shape is documented in [docs/architecture/episode-flywheel.md](docs/ar
 - One episode is written at the end of every graph run, including failed runs.
 - Provenance on every episode is `dev_guild`, `trading`, or `app`.
 - Trading actions go through the external trading control service. Broker credentials stay in that service. Paper mode, hard limits, and the kill switch are enforced there, outside the LLM.
-- The first registered Dev Guild worker is `code_review`.
+- Registered Dev Guild workers are `code_review` and `schema_agent`.
 
 ## External artifacts
 

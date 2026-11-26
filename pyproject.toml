@@ -19,7 +19,6 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "pytest==9.2.0",
-  "PyYAML==6.0.4",
 ]
 postgres = [
   "psycopg[binary]==3.3.9",
@@ -32,7 +31,7 @@ embeddings = [
 include = ["midplane*"]
 
 [tool.setuptools.package-data]
-midplane = ["gateway/roster.json", "retrieval/connectors.yaml"]
+midplane = ["gateway/roster.json", "retrieval/connectors.yaml", "prompts/*.md", "connectors/*.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -22,13 +22,13 @@ DEFAULT_ROUTE_TABLE = {
     "models": [
         {
             "id": "fake-small",
-            "task_types": ["code_review"],
+            "task_types": ["code_review", "schema_agent"],
             "cost_rank": 0,
             "latency_rank": 0,
         },
         {
             "id": "fake-large",
-            "task_types": ["code_review"],
+            "task_types": ["code_review", "schema_agent"],
             "cost_rank": 1,
             "latency_rank": 1,
         },
@@ -123,7 +123,7 @@ def route_table_from_env(env: Mapping[str, str] | None = None) -> dict:
     models = [
         {
             "id": primary,
-            "task_types": ["code_review"],
+            "task_types": ["code_review", "schema_agent"],
             "cost_rank": 0,
             "latency_rank": 0,
         }
@@ -132,7 +132,7 @@ def route_table_from_env(env: Mapping[str, str] | None = None) -> dict:
         models.append(
             {
                 "id": fallback,
-                "task_types": ["code_review"],
+                "task_types": ["code_review", "schema_agent"],
                 "cost_rank": 1,
                 "latency_rank": 1,
             }
